@@ -33,10 +33,12 @@ func runOperators(config string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wg, ctx := errgroup.WithContext(ctx)
 
+	logrus.Info("Creating operator config")
 	operatorConfig, err := operator.NewOperatorConfig(config)
 	if err != nil {
 		logrus.Fatalf("Failed to create operator config: [%v]", err)
 	}
+	wg.Go(func() error { return operatorConfig.Run(ctx.Done()) })
 	logrus.Info("Staring operators")
 	for name, operator := range operator.GetOperators() {
 		logrus.Infof("Starting [%s] operator", name)
@@ -51,6 +53,11 @@ func runOperators(config string) {
 	case <-term:
 		logrus.Infof("Received SIGTERM, shutting down")
 	case <-ctx.Done():
+	}
+
+	for name, operator := range operator.GetOperators() {
+		logrus.Infof("Shutting down [%s] operator", name)
+		operator.Shutdown()
 	}
 
 	cancel()

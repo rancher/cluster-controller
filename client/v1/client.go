@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	Group = "monitoring.rancher.com"
+	Group = "rancher.com"
 )
 
 var Version = "v1"

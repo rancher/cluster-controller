@@ -23,6 +23,7 @@ type Operator interface {
 	GetName() string
 	Run(stopc <-chan struct{}) error
 	Init(config *OperatorConfig)
+	Shutdown()
 }
 
 var (
@@ -71,4 +72,10 @@ func NewOperatorConfig(config string) (*OperatorConfig, error) {
 	)
 
 	return operatorCfg, nil
+}
+
+func (c *OperatorConfig) Run(stopc <-chan struct{}) error {
+	c.ClusterInformer.Run(stopc)
+	c.ClusterNodeInformer.Run(stopc)
+	return nil
 }
