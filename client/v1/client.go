@@ -28,13 +28,17 @@ func (c *ClustersManagerV1Client) Clusters() ClusterInterface {
 	return newClusters(c.restClient, c.dynamicClient)
 }
 
+func (c *ClustersManagerV1Client) ClusterNodes() ClusterNodeInterface {
+	return newClusterNodes(c.restClient, c.dynamicClient)
+}
+
 func (c *ClustersManagerV1Client) RESTClient() rest.Interface {
 	return c.restClient
 }
 
-func NewForConfig(apiGroup string, c *rest.Config) (*ClustersManagerV1Client, error) {
+func NewForConfig(c *rest.Config) (*ClustersManagerV1Client, error) {
 	config := *c
-	SetConfigDefaults(apiGroup, &config)
+	SetConfigDefaults(&config)
 	client, err := rest.RESTClientFor(&config)
 	if err != nil {
 		return nil, err
@@ -48,9 +52,9 @@ func NewForConfig(apiGroup string, c *rest.Config) (*ClustersManagerV1Client, er
 	return &ClustersManagerV1Client{client, dynamicClient}, nil
 }
 
-func SetConfigDefaults(apiGroup string, config *rest.Config) {
+func SetConfigDefaults(config *rest.Config) {
 	config.GroupVersion = &schema.GroupVersion{
-		Group:   apiGroup,
+		Group:   Group,
 		Version: Version,
 	}
 	config.APIPath = "/apis"

@@ -2,16 +2,13 @@ package utils
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/pkg/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/tools/cache"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
-)
-
-var (
-	keyFunc = cache.DeletionHandlingMetaNamespaceKeyFunc
 )
 
 // TaskQueue manages a work queue through an independent worker that
@@ -23,6 +20,8 @@ type TaskQueue struct {
 	sync func(string)
 	// workerDone is closed when the worker exits
 	workerDone chan struct{}
+	// key func is to define the key to be used by cache
+	keyFunc func(obj interface{}) (string, error)
 }
 
 // Enqueue enqueues ns/name of the given api object in the task queue.
@@ -30,7 +29,7 @@ func (t *TaskQueue) Enqueue(obj interface{}) {
 	if key, ok := obj.(string); ok {
 		t.queue.Add(key)
 	} else {
-		key, err := keyFunc(obj)
+		key, err := t.keyFunc(obj)
 		if err != nil {
 			logrus.Infof("could not get key for object %+v: %v", obj, err)
 			return
@@ -66,10 +65,15 @@ func (t *TaskQueue) Shutdown() {
 
 // NewTaskQueue creates a new task queue with the given sync function.
 // The sync function is called for every element inserted into the queue.
-func NewTaskQueue(name string, syncFn func(string)) *TaskQueue {
+func NewTaskQueue(name string, keyFunc func(obj interface{}) (string, error), syncFn func(string)) *TaskQueue {
 	return &TaskQueue{
 		queue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
 		sync:       syncFn,
+		keyFunc:    keyFunc,
 		workerDone: make(chan struct{}),
 	}
+}
+
+func (t *TaskQueue) Run(period time.Duration, stopCh <-chan struct{}) {
+	wait.Until(t.worker, period, stopCh)
 }
