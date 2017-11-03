@@ -13,49 +13,49 @@ const (
 	ResyncPeriod = 1 * time.Minute
 )
 
-type OperatorConfig struct {
+type ControllerConfig struct {
 	ClientSet           *client.V1
 	ClusterInformer     cache.SharedIndexInformer
 	ClusterNodeInformer cache.SharedIndexInformer
 }
 
-type Operator interface {
+type Controller interface {
 	GetName() string
 	Run(stopc <-chan struct{}) error
-	Init(config *OperatorConfig)
+	Init(config *ControllerConfig)
 	Shutdown()
 }
 
 var (
-	operators map[string]Operator
+	controllers map[string]Controller
 )
 
-func GetOperators() map[string]Operator {
-	return operators
+func GetControllers() map[string]Controller {
+	return controllers
 }
 
-func RegisterOperator(name string, operator Operator) error {
-	if operators == nil {
-		operators = make(map[string]Operator)
+func RegisterController(name string, controller Controller) error {
+	if controllers == nil {
+		controllers = make(map[string]Controller)
 	}
-	if _, exists := operators[name]; exists {
-		return fmt.Errorf("operator already registered")
+	if _, exists := controllers[name]; exists {
+		return fmt.Errorf("controller already registered")
 	}
-	operators[name] = operator
+	controllers[name] = controller
 	return nil
 }
 
-func NewOperatorConfig(config string) (*OperatorConfig, error) {
+func NewControllerConfig(config string) (*ControllerConfig, error) {
 	clientSet, err := client.NewClientSetV1(config)
 	if err != nil {
 		return nil, err
 	}
 
-	operatorCfg := &OperatorConfig{
+	controllerCfg := &ControllerConfig{
 		ClientSet: clientSet,
 	}
 
-	operatorCfg.ClusterInformer = cache.NewSharedIndexInformer(
+	controllerCfg.ClusterInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc:  clientSet.ClusterClientV1.Clusters().List,
 			WatchFunc: clientSet.ClusterClientV1.Clusters().Watch,
@@ -63,7 +63,7 @@ func NewOperatorConfig(config string) (*OperatorConfig, error) {
 		&v1.Cluster{}, ResyncPeriod, cache.Indexers{},
 	)
 
-	operatorCfg.ClusterNodeInformer = cache.NewSharedIndexInformer(
+	controllerCfg.ClusterNodeInformer = cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc:  clientSet.ClusterClientV1.ClusterNodes().List,
 			WatchFunc: clientSet.ClusterClientV1.ClusterNodes().Watch,
@@ -71,10 +71,10 @@ func NewOperatorConfig(config string) (*OperatorConfig, error) {
 		&v1.ClusterNode{}, ResyncPeriod, cache.Indexers{},
 	)
 
-	return operatorCfg, nil
+	return controllerCfg, nil
 }
 
-func (c *OperatorConfig) Run(stopc <-chan struct{}) error {
+func (c *ControllerConfig) Run(stopc <-chan struct{}) error {
 	c.ClusterInformer.Run(stopc)
 	c.ClusterNodeInformer.Run(stopc)
 	return nil

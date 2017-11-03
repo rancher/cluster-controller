@@ -7,7 +7,7 @@ import (
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
-	operator "github.com/rancher/cluster-controller/operator"
+	controller "github.com/rancher/cluster-controller/controller"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
@@ -22,28 +22,28 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		runOperators(c.String("config"))
+		runControllers(c.String("config"))
 		return nil
 	}
 	app.Run(os.Args)
 }
 
-func runOperators(config string) {
+func runControllers(config string) {
 	logrus.Info("Staring cluster manager")
 	ctx, cancel := context.WithCancel(context.Background())
 	wg, ctx := errgroup.WithContext(ctx)
 
-	logrus.Info("Creating operator config")
-	operatorConfig, err := operator.NewOperatorConfig(config)
+	logrus.Info("Creating controller config")
+	controllerConfig, err := controller.NewControllerConfig(config)
 	if err != nil {
-		logrus.Fatalf("Failed to create operator config: [%v]", err)
+		logrus.Fatalf("Failed to create controller config: [%v]", err)
 	}
-	wg.Go(func() error { return operatorConfig.Run(ctx.Done()) })
-	logrus.Info("Staring operators")
-	for name, operator := range operator.GetOperators() {
-		logrus.Infof("Starting [%s] operator", name)
-		operator.Init(operatorConfig)
-		wg.Go(func() error { return operator.Run(ctx.Done()) })
+	wg.Go(func() error { return controllerConfig.Run(ctx.Done()) })
+	logrus.Info("Staring controllers")
+	for name, c := range controller.GetControllers() {
+		logrus.Infof("Starting [%s] controller", name)
+		c.Init(controllerConfig)
+		wg.Go(func() error { return c.Run(ctx.Done()) })
 	}
 
 	term := make(chan os.Signal)
@@ -55,9 +55,9 @@ func runOperators(config string) {
 	case <-ctx.Done():
 	}
 
-	for name, operator := range operator.GetOperators() {
-		logrus.Infof("Shutting down [%s] operator", name)
-		operator.Shutdown()
+	for name, c := range controller.GetControllers() {
+		logrus.Infof("Shutting down [%s] controller", name)
+		c.Shutdown()
 	}
 
 	cancel()
