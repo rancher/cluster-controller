@@ -10,7 +10,7 @@ import (
 )
 
 type Provisioner struct {
-	config       *controller.ControllerConfig
+	config       *controller.Config
 	syncQueue    *utils.TaskQueue
 	cleanupQueue *utils.TaskQueue
 }
@@ -21,7 +21,7 @@ func init() {
 	controller.RegisterController(p.GetName(), p)
 }
 
-func (p *Provisioner) Init(cfg *controller.ControllerConfig) {
+func (p *Provisioner) Init(cfg *controller.Config) {
 	p.config = cfg
 	p.syncQueue = utils.NewTaskQueue("clustersync", p.keyFunc, p.sync)
 	p.cleanupQueue = utils.NewTaskQueue("clustercleanup", p.keyFunc, p.cleanup)

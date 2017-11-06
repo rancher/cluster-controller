@@ -13,7 +13,7 @@ const (
 	ResyncPeriod = 1 * time.Minute
 )
 
-type ControllerConfig struct {
+type Config struct {
 	ClientSet           *client.V1
 	ClusterInformer     cache.SharedIndexInformer
 	ClusterNodeInformer cache.SharedIndexInformer
@@ -22,7 +22,7 @@ type ControllerConfig struct {
 type Controller interface {
 	GetName() string
 	Run(stopc <-chan struct{}) error
-	Init(config *ControllerConfig)
+	Init(config *Config)
 	Shutdown()
 }
 
@@ -45,13 +45,13 @@ func RegisterController(name string, controller Controller) error {
 	return nil
 }
 
-func NewControllerConfig(config string) (*ControllerConfig, error) {
+func NewControllerConfig(config string) (*Config, error) {
 	clientSet, err := client.NewClientSetV1(config)
 	if err != nil {
 		return nil, err
 	}
 
-	controllerCfg := &ControllerConfig{
+	controllerCfg := &Config{
 		ClientSet: clientSet,
 	}
 
@@ -74,7 +74,7 @@ func NewControllerConfig(config string) (*ControllerConfig, error) {
 	return controllerCfg, nil
 }
 
-func (c *ControllerConfig) Run(stopc <-chan struct{}) error {
+func (c *Config) Run(stopc <-chan struct{}) error {
 	c.ClusterInformer.Run(stopc)
 	c.ClusterNodeInformer.Run(stopc)
 	return nil
