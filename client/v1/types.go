@@ -71,7 +71,43 @@ type ClusterCondition struct {
 }
 
 type GKEConfig struct {
-	//TBD
+	// ProjectID is the ID of your project to use when creating a cluster
+	ProjectID string
+	// The zone to launch the cluster
+	Zone string
+	// The IP address range of the container pods
+	ClusterIpv4Cidr string
+	// An optional description of this cluster
+	Description string
+	// The number of nodes to create in this cluster
+	InitialNodeCount int64
+	// Size of the disk attached to each node
+	DiskSizeGb int64
+	// The name of a Google Compute Engine
+	MachineType string
+	// the initial kubernetes version
+	InitialClusterVersion string
+	// The map of Kubernetes labels (key/value pairs) to be applied
+	// to each node.
+	Labels map[string]string
+	// The path to the credential file(key.json)
+	CredentialPath string
+	// Enable alpha feature
+	EnableAlphaFeature bool
+	// NodePool id
+	NodePoolID string
+
+	// Update Config
+	UpdateConfig gkeUpdateConfig
+}
+
+type gkeUpdateConfig struct {
+	// the number of node
+	NodeCount int64
+	// Master kubernetes version
+	MasterVersion string
+	// Node kubernetes version
+	NodeVersion string
 }
 
 type AKSConfig struct {
