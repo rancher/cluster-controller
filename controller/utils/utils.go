@@ -8,6 +8,8 @@ import (
 	"github.com/pkg/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 )
 
@@ -76,4 +78,17 @@ func NewTaskQueue(name string, keyFunc func(obj interface{}) (string, error), sy
 
 func (t *TaskQueue) Run(period time.Duration, stopCh <-chan struct{}) {
 	wait.Until(t.worker, period, stopCh)
+}
+
+// CreateClusterClient creates a new client for the cluster
+func CreateClusterClient(host string, token string, caCert string) (*kubernetes.Clientset, error) {
+	var cfg *rest.Config
+
+	cfg = &rest.Config{
+		Host:        host,
+		BearerToken: token,
+	}
+	cfg.TLSClientConfig.CAData = []byte(caCert)
+
+	return kubernetes.NewForConfig(cfg)
 }

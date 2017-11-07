@@ -54,6 +54,7 @@ type ClusterStatus struct {
 	ComponentStatuses   v1.ComponentStatusList
 	APIEndpoint         string
 	ServiceAccountToken string
+	CACert              string
 }
 
 type ClusterCondition struct {
