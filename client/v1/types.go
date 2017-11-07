@@ -40,9 +40,9 @@ type ClusterList struct {
 }
 
 type ClusterSpec struct {
-	GkeConfig *GkeConfig
-	AksConfig *AksConfig
-	RkeConfig *RkeConfig
+	GKEConfig *GKEConfig
+	AKSConfig *AKSConfig
+	RKEConfig *RKEConfig
 }
 
 type ClusterStatus struct {
@@ -70,29 +70,20 @@ type ClusterCondition struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-type GkeConfig struct {
+type GKEConfig struct {
 	//TBD
 }
 
-type AksConfig struct {
+type AKSConfig struct {
 	//TBD
 }
 
-type RkeConfig struct {
+type RKEConfig struct {
 	//TBD
 }
 
 type ClusterNode struct {
-	metav1.TypeMeta `json:",inline"`
-	// Standard object’s metadata. More info:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#metadata
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	// Specification of the desired behavior of the the cluster. More info:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#spec-and-status
-	Spec ClusterNodeSpec `json:"spec"`
-	// Most recent observed status of the cluster. More info:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#spec-and-status
-	Status *ClusterNodeStatus `json:"status"`
+	v1.Node
 }
 
 type ClusterNodeList struct {
@@ -102,12 +93,4 @@ type ClusterNodeList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	// List of Clusters
 	Items []*Cluster `json:"items"`
-}
-
-type ClusterNodeSpec struct {
-	//TBD
-}
-
-type ClusterNodeStatus struct {
-	//TBD
 }
