@@ -115,7 +115,85 @@ type AKSConfig struct {
 }
 
 type RKEConfig struct {
-	//TBD
+	// Kubernetes nodes
+	Hosts []RKEConfigHost `yaml:"hosts"`
+	// Kubernetes components
+	Services RKEConfigServices `yaml:"services"`
+}
+
+type RKEConfigHost struct {
+	// SSH IP address of the host
+	IP string `yaml:"ip"`
+	// Advertised address that will be used for components communication
+	AdvertiseAddress string `yaml:"advertise_address"`
+	// Host role in kubernetes cluster (controlplane, worker, or etcd)
+	Role []string `yaml:"role"`
+	// Hostname of the host
+	Hostname string `yaml:"hostname"`
+	// SSH usesr that will be used by RKE
+	User string `yaml:"user"`
+	// Docker socket on the host that will be used in tunneling
+	DockerSocket string `yaml:"docker_socket"`
+}
+
+type RKEConfigServices struct {
+	// Etcd Service
+	Etcd ETCDService `yaml:"etcd"`
+	// KubeAPI Service
+	KubeAPI KubeAPIService `yaml:"kube-api"`
+	// KubeController Service
+	KubeController KubeControllerService `yaml:"kube-controller"`
+	// Scheduler Service
+	Scheduler SchedulerService `yaml:"scheduler"`
+	// Kubelet Service
+	Kubelet KubeletService `yaml:"kubelet"`
+	// KubeProxy Service
+	Kubeproxy KubeproxyService `yaml:"kubeproxy"`
+}
+
+type ETCDService struct {
+	// Base service properties
+	baseService
+}
+
+type KubeAPIService struct {
+	// Base service properties
+	baseService
+	// Virtual IP range that will be used by Kubernetes services
+	ServiceClusterIPRange string `yaml:"service_cluster_ip_range"`
+}
+
+type KubeControllerService struct {
+	// Base service properties
+	baseService
+	// CIDR Range for Pods in cluster
+	ClusterCIDR string `yaml:"cluster_cidr"`
+	// Virtual IP range that will be used by Kubernetes services
+	ServiceClusterIPRange string `yaml:"service_cluster_ip_range"`
+}
+
+type KubeletService struct {
+	// Base service properties
+	baseService
+	// Domain of the cluster (default: "cluster.local")
+	ClusterDomain string `yaml:"cluster_domain"`
+	// The image whose network/ipc namespaces containers in each pod will use
+	InfraContainerImage string `yaml:"infra_container_image"`
+}
+
+type KubeproxyService struct {
+	// Base service properties
+	baseService
+}
+
+type SchedulerService struct {
+	// Base service properties
+	baseService
+}
+
+type baseService struct {
+	// Docker image of the service
+	Image string `yaml:"image"`
 }
 
 type ClusterNode struct {
