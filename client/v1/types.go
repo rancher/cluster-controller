@@ -119,6 +119,8 @@ type RKEConfig struct {
 	Hosts []RKEConfigHost `yaml:"hosts"`
 	// Kubernetes components
 	Services RKEConfigServices `yaml:"services"`
+	// Network plugin used in the kubernetes cluster (flannel, calico)
+	NetworkPlugin string `yaml:"network_plugin"`
 }
 
 type RKEConfigHost struct {
