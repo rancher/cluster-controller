@@ -38,10 +38,13 @@ func runControllers(config string) {
 	if err != nil {
 		logrus.Fatalf("Failed to create controller config: [%v]", err)
 	}
+	logrus.Info("Created controller config")
 	wg.Go(func() error { return controllerConfig.Run(ctx.Done()) })
+
 	logrus.Info("Staring controllers")
-	for name, c := range controller.GetControllers() {
+	for name, _ := range controller.GetControllers() {
 		logrus.Infof("Starting [%s] controller", name)
+		c := controller.GetControllers()[name]
 		c.Init(controllerConfig)
 		wg.Go(func() error { return c.Run(ctx.Done()) })
 	}
@@ -55,12 +58,12 @@ func runControllers(config string) {
 	case <-ctx.Done():
 	}
 
+	cancel()
 	for name, c := range controller.GetControllers() {
 		logrus.Infof("Shutting down [%s] controller", name)
 		c.Shutdown()
 	}
 
-	cancel()
 	if err := wg.Wait(); err != nil {
 		logrus.Errorf("Unhandled error received, shutting down: [%v]", err)
 		os.Exit(1)

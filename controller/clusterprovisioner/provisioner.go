@@ -2,13 +2,13 @@ package provisioner
 
 import (
 	"fmt"
-	"time"
+
+	"reflect"
 
 	"github.com/Sirupsen/logrus"
 	clusterV1 "github.com/rancher/cluster-controller/client/v1"
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/cluster-controller/controller/utils"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -19,13 +19,12 @@ type Provisioner struct {
 
 func init() {
 	p := &Provisioner{}
-
 	controller.RegisterController(p.GetName(), p)
 }
 
 func (p *Provisioner) Init(cfg *controller.Config) {
 	p.config = cfg
-	p.syncQueue = utils.NewTaskQueue("clustersync", p.keyFunc, p.sync)
+	p.syncQueue = utils.NewTaskQueue("clusterprovisionersync", p.keyFunc, p.sync)
 
 	p.config.ClusterInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    p.handleClusterCreate,
@@ -48,8 +47,25 @@ func (p *Provisioner) handleClusterUpdate(old, current interface{}) {
 	if err != nil {
 		return
 	}
-	logrus.Infof("Cluster updated [%s]", key)
-	p.syncQueue.Enqueue(current)
+	if configChanged(old, current) {
+		logrus.Infof("Cluster [%s] updated with the new config", key)
+		p.syncQueue.Enqueue(current)
+	}
+}
+
+func configChanged(old, current interface{}) bool {
+	oldC := old.(*clusterV1.Cluster)
+	newC := current.(*clusterV1.Cluster)
+	changed := false
+	if newC.Spec.AKSConfig != nil {
+		changed = !reflect.DeepEqual(newC.Spec.AKSConfig, oldC.Spec.AKSConfig)
+	} else if newC.Spec.GKEConfig != nil {
+		changed = !reflect.DeepEqual(newC.Spec.GKEConfig, oldC.Spec.GKEConfig)
+	} else if newC.Spec.AKSConfig != nil {
+		changed = !reflect.DeepEqual(newC.Spec.AKSConfig, oldC.Spec.AKSConfig)
+	}
+
+	return changed
 }
 
 func (p *Provisioner) handleClusterDelete(obj interface{}) {
@@ -67,31 +83,28 @@ func (p *Provisioner) keyFunc(obj interface{}) (string, error) {
 	return cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 }
 
-func (p *Provisioner) sync(key string) {
-	logrus.Infof("Syncing cluster [%s]", key)
-	p.config.ClusterInformer.GetStore().GetByKey(key)
+func (p *Provisioner) sync(key string) error {
+	logrus.Infof("Syncing provisioning for cluster [%s]", key)
 	c, exists, err := p.config.ClusterInformer.GetStore().GetByKey(key)
 	if err != nil {
-		logrus.Errorf("Failed to get cluster by name [%s] %v", key, err)
-		p.syncQueue.Requeue(key, err)
-		return
+		return fmt.Errorf("Failed to get cluster by name [%s] %v", key, err)
 	}
 	if !exists {
+		//TODO = handle removal using finalizer
 		err = p.deleteCluster(key)
 		if err != nil {
-			logrus.Errorf("Failed to delete cluster [%s] %v", key, err)
-			p.syncQueue.Requeue(key, err)
+			return fmt.Errorf("Failed to delete cluster [%s] %v", key, err)
 		}
 	} else {
 		cluster := c.(*clusterV1.Cluster)
 		err = p.createOrUpdateCluster(cluster)
 		if err != nil {
-			logrus.Errorf("Failed to create/update cluster [%s] %v", key, err)
-			p.syncQueue.Requeue(key, err)
+			return fmt.Errorf("Failed to create/update cluster [%s] %v", key, err)
 		}
 	}
 
-	logrus.Infof("Successfully synced cluster [%s]", key)
+	logrus.Infof("Successfully synced provisioning cluster [%s]", key)
+	return nil
 }
 
 func (p *Provisioner) deleteCluster(key string) error {
@@ -99,20 +112,8 @@ func (p *Provisioner) deleteCluster(key string) error {
 }
 
 // createOrUpdateCluster calls drivers to provision the cluster
-// TODO - add implementation. Currently it just creates a client/tests a cluster
 func (p *Provisioner) createOrUpdateCluster(cluster *clusterV1.Cluster) error {
-	clusterClient, err := utils.CreateClusterClient(cluster.Status.APIEndpoint, cluster.Status.ServiceAccountToken,
-		cluster.Status.CACert)
-	if err != nil {
-		return fmt.Errorf("Failed to contact cluster %v", err)
-	}
-	nodes, err := clusterClient.Core().Nodes().List(v1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("Failed to list nodes %v", err)
-	}
-	for _, node := range nodes.Items {
-		logrus.Infof("Node is %v", node.Name)
-	}
+	//TODO add implementation logic
 	return nil
 }
 
@@ -123,8 +124,7 @@ func (p *Provisioner) cleanup(key string) {
 }
 
 func (p *Provisioner) Run(stopc <-chan struct{}) error {
-
-	go p.syncQueue.Run(time.Second, stopc)
+	go p.syncQueue.Run()
 
 	<-stopc
 	return nil

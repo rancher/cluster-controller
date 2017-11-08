@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	ResyncPeriod = 10 * time.Minute
+	ResyncPeriod = 1 * time.Minute
 )
 
 type Config struct {
