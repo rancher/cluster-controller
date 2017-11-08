@@ -181,6 +181,8 @@ type KubeletService struct {
 	ClusterDomain string `yaml:"cluster_domain"`
 	// The image whose network/ipc namespaces containers in each pod will use
 	InfraContainerImage string `yaml:"infra_container_image"`
+	// Cluster DNS service ip
+	ClusterDNSServer string `yaml:"cluster_dns_server"`
 }
 
 type KubeproxyService struct {
