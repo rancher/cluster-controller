@@ -72,42 +72,42 @@ type ClusterCondition struct {
 
 type GKEConfig struct {
 	// ProjectID is the ID of your project to use when creating a cluster
-	ProjectID string
+	ProjectID string `json:"projectId,omitempty"`
 	// The zone to launch the cluster
-	Zone string
+	Zone string `json:"zone,omitempty"`
 	// The IP address range of the container pods
-	ClusterIpv4Cidr string
+	ClusterIpv4Cidr string `json:"clusterIpv4Cidr,omitempty"`
 	// An optional description of this cluster
-	Description string
+	Description string `json:"description,omitempty"`
 	// The number of nodes to create in this cluster
-	InitialNodeCount int64
+	InitialNodeCount int64 `json:"initialNodeCount,omitempty"`
 	// Size of the disk attached to each node
-	DiskSizeGb int64
+	DiskSizeGb int64 `json:"diskSizeGb,omitempty"`
 	// The name of a Google Compute Engine
-	MachineType string
+	MachineType string `json:"machineType,omitempty"`
 	// the initial kubernetes version
-	InitialClusterVersion string
+	InitialClusterVersion string `json:"initialClusterVersion,omitempty"`
 	// The map of Kubernetes labels (key/value pairs) to be applied
 	// to each node.
-	Labels map[string]string
+	Labels map[string]string `json:"labels,omitempty"`
 	// The path to the credential file(key.json)
-	CredentialPath string
+	CredentialPath string `json:"credentialPath,omitempty"`
 	// Enable alpha feature
-	EnableAlphaFeature bool
+	EnableAlphaFeature bool `json:"enableAlphaFeature,omitempty"`
 	// NodePool id
-	NodePoolID string
+	NodePoolID string `json:"nodePoolId,omitempty"`
 
 	// Update Config
-	UpdateConfig gkeUpdateConfig
+	UpdateConfig gkeUpdateConfig `json:"updateConfig,omitempty"`
 }
 
 type gkeUpdateConfig struct {
 	// the number of node
-	NodeCount int64
+	NodeCount int64 `json:"nodeCount,omitempty"`
 	// Master kubernetes version
-	MasterVersion string
+	MasterVersion string `json:"masterVersion,omitempty"`
 	// Node kubernetes version
-	NodeVersion string
+	NodeVersion string `json:"nodeVersion,omitempty"`
 }
 
 type AKSConfig struct {
