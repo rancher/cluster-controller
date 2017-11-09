@@ -155,19 +155,19 @@ type RKEConfigServices struct {
 
 type ETCDService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 }
 
 type KubeAPIService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 	// Virtual IP range that will be used by Kubernetes services
 	ServiceClusterIPRange string `yaml:"service_cluster_ip_range"`
 }
 
 type KubeControllerService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 	// CIDR Range for Pods in cluster
 	ClusterCIDR string `yaml:"cluster_cidr"`
 	// Virtual IP range that will be used by Kubernetes services
@@ -176,7 +176,7 @@ type KubeControllerService struct {
 
 type KubeletService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 	// Domain of the cluster (default: "cluster.local")
 	ClusterDomain string `yaml:"cluster_domain"`
 	// The image whose network/ipc namespaces containers in each pod will use
@@ -187,12 +187,12 @@ type KubeletService struct {
 
 type KubeproxyService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 }
 
 type SchedulerService struct {
 	// Base service properties
-	baseService
+	baseService `yaml:",inline"`
 }
 
 type baseService struct {
