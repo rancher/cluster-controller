@@ -121,6 +121,8 @@ type RKEConfig struct {
 	Services RKEConfigServices `yaml:"services"`
 	// Network plugin used in the kubernetes cluster (flannel, calico)
 	NetworkPlugin string `yaml:"network_plugin"`
+	// Authentication type used in the cluster (default: x509)
+	AuthType string `yaml:"auth_type"`
 }
 
 type RKEConfigHost struct {
