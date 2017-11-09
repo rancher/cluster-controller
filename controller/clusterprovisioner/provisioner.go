@@ -111,16 +111,9 @@ func (p *Provisioner) deleteCluster(key string) error {
 	return nil
 }
 
-// createOrUpdateCluster calls drivers to provision the cluster
 func (p *Provisioner) createOrUpdateCluster(cluster *clusterV1.Cluster) error {
-	//TODO add implementation logic
+	//TODO call drivers to provision the cluster
 	return nil
-}
-
-func (p *Provisioner) cleanup(key string) {
-	logrus.Infof("Removing cluster %s", key)
-	//TODO call cluster provisioner drivers
-	logrus.Infof("Successfully removed cluster [%s]", key)
 }
 
 func (p *Provisioner) Run(stopc <-chan struct{}) error {

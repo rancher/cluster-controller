@@ -17,6 +17,7 @@ var Version = "v1"
 type ClustersManagerV1Interface interface {
 	RESTClient() rest.Interface
 	ClustersGetter
+	ClusterNodesGetter
 }
 
 type ClustersManagerV1Client struct {

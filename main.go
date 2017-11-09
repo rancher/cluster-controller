@@ -42,7 +42,7 @@ func runControllers(config string) {
 	wg.Go(func() error { return controllerConfig.Run(ctx.Done()) })
 
 	logrus.Info("Staring controllers")
-	for name, _ := range controller.GetControllers() {
+	for name := range controller.GetControllers() {
 		logrus.Infof("Starting [%s] controller", name)
 		c := controller.GetControllers()[name]
 		c.Init(controllerConfig)

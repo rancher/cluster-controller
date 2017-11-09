@@ -13,6 +13,7 @@ import (
 	clusterV1 "github.com/rancher/cluster-controller/client/v1"
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/cluster-controller/controller/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -34,9 +35,11 @@ func init() {
 }
 
 type NodesMonitor struct {
-	clientSet    *kubernetes.Clientset
-	nodeInformer cache.SharedIndexInformer
-	syncQueue    *utils.TaskQueue
+	clusterName   string
+	clusterConfig *controller.Config
+	clientSet     *kubernetes.Clientset
+	nodeInformer  cache.SharedIndexInformer
+	syncQueue     *utils.TaskQueue
 }
 
 func (s *ClusterSyncer) Init(cfg *controller.Config) {
@@ -142,7 +145,9 @@ func (s *ClusterSyncer) syncCluster(key string) error {
 	}
 
 	monitor := NodesMonitor{
-		clientSet: clientSet,
+		clusterName:   key,
+		clientSet:     clientSet,
+		clusterConfig: s.config,
 	}
 	watchList := cache.NewListWatchFromClient(clientSet.Core().RESTClient(), "nodes", v1.NamespaceAll, fields.Everything())
 	monitor.nodeInformer = cache.NewSharedIndexInformer(
@@ -182,9 +187,82 @@ func (s *ClusterSyncer) Shutdown() {
 
 func (m *NodesMonitor) syncNode(key string) error {
 	logrus.Infof("Syncing changes for node [%s]", key)
-	// TODO - do real sync (create/udpate/remove)
+	n, exists, err := m.nodeInformer.GetStore().GetByKey(key)
+	if err != nil {
+		return fmt.Errorf("Failed to get node by name [%s] %v", key, err)
+	}
+
+	if !exists {
+		err = m.deleteClusterNode(key)
+		if err != nil {
+			return fmt.Errorf("Failed to delete cluster [%s] %v", key, err)
+		}
+	} else {
+		node := n.(*v1.Node)
+		err = m.createOrUpdateClusterNode(node)
+		if err != nil {
+			return fmt.Errorf("Failed to create/update cluster [%s] %v", key, err)
+		}
+	}
+
 	logrus.Infof("Successfully synced changes for the node [%s]", key)
 	return nil
+}
+
+func (m *NodesMonitor) deleteClusterNode(nodeName string) error {
+	cn, exists, err := m.clusterConfig.ClusterNodeInformer.GetStore().GetByKey(nodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to get cluster node by name [%s] %v", nodeName, err)
+	}
+	if !exists {
+		logrus.Infof("ClusterNode [%s] is already removed")
+		return nil
+	}
+
+	clusterNode := cn.(*clusterV1.ClusterNode)
+	err = m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Delete(clusterNode.ObjectMeta.Name, nil)
+	if err != nil {
+		return fmt.Errorf("Failed to delete cluster node [%s] %v", nodeName, err)
+	}
+	return nil
+}
+
+func (m *NodesMonitor) createOrUpdateClusterNode(node *v1.Node) error {
+	existing, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Get(node.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("Failed to get cluster node by name [%s] %v", node.Name, err)
+	}
+
+	clusterNode := convertNodeToClusterNode(node)
+	if existing == nil {
+		logrus.Infof("Creating cluster node [%s]", clusterNode.Name)
+		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Create(clusterNode)
+		if err != nil {
+			return fmt.Errorf("Failed to create cluster node [%s] %v", node.Name, err)
+		}
+	} else {
+		logrus.Infof("Updating cluster node [%s]", clusterNode.Name)
+		//TODO - consider doing merge2ways once more than one controller modifies the clusterNode
+		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Update(clusterNode)
+		if err != nil {
+			return fmt.Errorf("Failed to update cluster node [%s] %v", node.Name, err)
+		}
+	}
+	return nil
+}
+
+func convertNodeToClusterNode(node *v1.Node) *clusterV1.ClusterNode {
+	clusterNode := &clusterV1.ClusterNode{
+		Node: *node,
+	}
+	clusterNode.APIVersion = ""
+	clusterNode.Kind = ""
+	clusterNode.ObjectMeta = metav1.ObjectMeta{
+		Name:        node.Name,
+		Labels:      node.Labels,
+		Annotations: node.Annotations,
+	}
+	return clusterNode
 }
 
 func (m *NodesMonitor) handleNodeCreate(obj interface{}) {

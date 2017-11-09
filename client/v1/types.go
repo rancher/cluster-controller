@@ -40,9 +40,9 @@ type ClusterList struct {
 }
 
 type ClusterSpec struct {
-	GKEConfig *GKEConfig
-	AKSConfig *AKSConfig
-	RKEConfig *RKEConfig
+	GKEConfig *GKEConfig `json:"gkeConfig,omitempty"`
+	AKSConfig *AKSConfig `json:"aksConfig,omitempty"`
+	RKEConfig *RKEConfig `json:"rkeConfig,omitempty"`
 }
 
 type ClusterStatus struct {
@@ -52,9 +52,9 @@ type ClusterStatus struct {
 	//Component statuses will represent cluster's components (etcd/controller/scheduler) health
 	// https://kubernetes.io/docs/api-reference/v1.8/#componentstatus-v1-core
 	ComponentStatuses   v1.ComponentStatusList
-	APIEndpoint         string
-	ServiceAccountToken string
-	CACert              string
+	APIEndpoint         string `json:"apiEndpoint,omitempty"`
+	ServiceAccountToken string `json:"serviceAccountToken,omitempty"`
+	CACert              string `json:"caCert,omitempty"`
 }
 
 type ClusterCondition struct {
@@ -204,6 +204,13 @@ type baseService struct {
 
 type ClusterNode struct {
 	v1.Node
+}
+
+type ClusterNodeMetadata struct {
+	// Standard object’s metadata. More info:
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/api-conventions.md#metadata
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	ClusterName       string `json:"clusterName,omitempty"`
 }
 
 type ClusterNodeList struct {

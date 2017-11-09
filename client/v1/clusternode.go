@@ -83,7 +83,7 @@ func (p *clusternodes) Update(o *ClusterNode) (*ClusterNode, error) {
 		return nil, err
 	}
 
-	curp, err := p.Get(o.Name, metav1.GetOptions{})
+	curp, err := p.Get(o.ObjectMeta.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current version for update")
 	}
@@ -125,7 +125,7 @@ func (p *clusternodes) Watch(opts metav1.ListOptions) (watch.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	return watch.NewStreamWatcher(&clusterDecoder{
+	return watch.NewStreamWatcher(&clusterNodeDecoder{
 		dec:   json.NewDecoder(r),
 		close: r.Close,
 	}), nil
