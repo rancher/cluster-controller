@@ -14,6 +14,12 @@ const (
 	ClusterConditionProvisioned = "Provisioned"
 	// ClusterConditionUpdating Cluster is being updating (upgrading, scaling up)
 	ClusterConditionUpdating = "Updating"
+	// ClusterConditionSufficientDisk true when all cluster nodes have sufficient disk
+	ClusterConditionSufficientDisk = "SufficientDisk"
+	// ClusterConditionSufficientMemory true when all cluster nodes have sufficient memory
+	ClusterConditionSufficientMemory = "SufficientMemory"
+	// ClusterConditionNoDiskPressure true when all cluster nodes have no disk pressure
+	ClusterConditionNoDiskPressure = "NoDiskPressure"
 	// More conditions can be added if unredlying controllers request it
 )
 
@@ -52,9 +58,11 @@ type ClusterStatus struct {
 	//Component statuses will represent cluster's components (etcd/controller/scheduler) health
 	// https://kubernetes.io/docs/api-reference/v1.8/#componentstatus-v1-core
 	ComponentStatuses   v1.ComponentStatusList
-	APIEndpoint         string `json:"apiEndpoint,omitempty"`
-	ServiceAccountToken string `json:"serviceAccountToken,omitempty"`
-	CACert              string `json:"caCert,omitempty"`
+	APIEndpoint         string          `json:"apiEndpoint,omitempty"`
+	ServiceAccountToken string          `json:"serviceAccountToken,omitempty"`
+	CACert              string          `json:"caCert,omitempty"`
+	Capacity            v1.ResourceList `json:"capacity,omitempty"`
+	Allocatable         v1.ResourceList `json:"allocatable,omitempty"`
 }
 
 type ClusterCondition struct {
