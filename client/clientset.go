@@ -1,7 +1,7 @@
 package client
 
 import (
-	clusterv1 "github.com/rancher/types/io.cattle.cluster/v1"
+	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )

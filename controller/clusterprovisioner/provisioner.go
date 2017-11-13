@@ -7,7 +7,7 @@ import (
 
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/cluster-controller/controller/utils"
-	clusterV1 "github.com/rancher/types/io.cattle.cluster/v1"
+	clusterV1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/cache"
 )
