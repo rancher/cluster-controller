@@ -5,7 +5,6 @@ import (
 	"time"
 
 	client "github.com/rancher/cluster-controller/client"
-	"github.com/rancher/cluster-controller/client/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -55,21 +54,8 @@ func NewControllerConfig(config string) (*Config, error) {
 		ClientSet: clientSet,
 	}
 
-	controllerCfg.ClusterInformer = cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc:  clientSet.ClusterClientV1.Clusters().List,
-			WatchFunc: clientSet.ClusterClientV1.Clusters().Watch,
-		},
-		&v1.Cluster{}, ResyncPeriod, cache.Indexers{},
-	)
-
-	controllerCfg.ClusterNodeInformer = cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc:  clientSet.ClusterClientV1.ClusterNodes().List,
-			WatchFunc: clientSet.ClusterClientV1.ClusterNodes().Watch,
-		},
-		&v1.ClusterNode{}, ResyncPeriod, cache.Indexers{},
-	)
+	controllerCfg.ClusterInformer = clientSet.ClusterClientV1.Clusters("").Controller().Informer()
+	controllerCfg.ClusterNodeInformer = clientSet.ClusterClientV1.ClusterNodes("").Controller().Informer()
 
 	return controllerCfg, nil
 }

@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/Sirupsen/logrus"
-	clusterV1 "github.com/rancher/cluster-controller/client/v1"
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/cluster-controller/controller/utils"
+	clusterV1 "github.com/rancher/types/io.cattle.cluster/v1"
+	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -220,7 +220,7 @@ func (m *NodesMonitor) deleteClusterNode(nodeName string) error {
 		return nil
 	}
 
-	err = m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Delete(clusterNode.ObjectMeta.Name, nil)
+	err = m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes("").Delete(clusterNode.ObjectMeta.Name, nil)
 	if err != nil {
 		return fmt.Errorf("Failed to delete cluster node [%s] %v", clusterNode.Name, err)
 	}
@@ -229,7 +229,7 @@ func (m *NodesMonitor) deleteClusterNode(nodeName string) error {
 
 func (m *NodesMonitor) getClusterNode(nodeName string) (*clusterV1.ClusterNode, error) {
 	clusterNodeName := fmt.Sprintf("%s-%s", m.clusterName, nodeName)
-	existing, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Get(clusterNodeName, metav1.GetOptions{})
+	existing, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes("").Get(clusterNodeName, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("Failed to get cluster node by name [%s] %v", clusterNodeName, err)
 	}
@@ -244,14 +244,14 @@ func (m *NodesMonitor) createOrUpdateClusterNode(node *v1.Node) error {
 	clusterNode := m.convertNodeToClusterNode(node)
 	if existing == nil {
 		logrus.Infof("Creating cluster node [%s]", clusterNode.Name)
-		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Create(clusterNode)
+		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes("").Create(clusterNode)
 		if err != nil {
 			return fmt.Errorf("Failed to create cluster node [%s] %v", clusterNode.Name, err)
 		}
 	} else {
 		logrus.Infof("Updating cluster node [%s]", clusterNode.Name)
 		//TODO - consider doing merge2ways once more than one controller modifies the clusterNode
-		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes().Update(clusterNode)
+		_, err := m.clusterConfig.ClientSet.ClusterClientV1.ClusterNodes("").Update(clusterNode)
 		if err != nil {
 			return fmt.Errorf("Failed to update cluster node [%s] %v", clusterNode.Name, err)
 		}

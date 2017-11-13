@@ -1,14 +1,14 @@
 package client
 
 import (
-	"github.com/rancher/cluster-controller/client/v1"
+	clusterv1 "github.com/rancher/types/io.cattle.cluster/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 type V1 struct {
 	CoreClientV1    *kubernetes.Clientset
-	ClusterClientV1 *v1.ClustersManagerV1Client
+	ClusterClientV1 clusterv1.Interface
 }
 
 func NewClientSetV1(config string) (*V1, error) {
@@ -21,7 +21,7 @@ func NewClientSetV1(config string) (*V1, error) {
 		return nil, err
 	}
 
-	clusterClient, err := v1.NewForConfig(cfg)
+	clusterClient, err := clusterv1.NewForConfig(*cfg)
 	if err != nil {
 		return nil, err
 	}

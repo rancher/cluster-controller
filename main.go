@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Sirupsen/logrus"
 	controller "github.com/rancher/cluster-controller/controller"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
@@ -16,8 +16,9 @@ func main() {
 	app := cli.NewApp()
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "config",
-			Usage: "Kube config for accessing kubernetes cluster",
+			Name:   "config",
+			Usage:  "Kube config for accessing kubernetes cluster",
+			EnvVar: "KUBECONFIG",
 		},
 	}
 

@@ -5,10 +5,10 @@ import (
 
 	"reflect"
 
-	"github.com/Sirupsen/logrus"
-	clusterV1 "github.com/rancher/cluster-controller/client/v1"
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/cluster-controller/controller/utils"
+	clusterV1 "github.com/rancher/types/io.cattle.cluster/v1"
+	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/tools/cache"
 )
 
