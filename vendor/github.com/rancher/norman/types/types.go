@@ -62,7 +62,6 @@ type APIVersion struct {
 type Schema struct {
 	ID                string            `json:"id,omitempty"`
 	CodeName          string            `json:"-"`
-	CodeNamePlural    string            `json:"-"`
 	PkgName           string            `json:"-"`
 	Type              string            `json:"type,omitempty"`
 	Links             map[string]string `json:"links"`
