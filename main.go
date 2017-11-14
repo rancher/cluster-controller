@@ -41,9 +41,8 @@ func runControllers(config string) {
 	}
 	logrus.Info("Created controller config")
 
-	logrus.Info("Staring controllers")
 	for name := range controller.GetControllers() {
-		logrus.Infof("Starting [%s] controller", name)
+		logrus.Infof("Adding [%s] handler", name)
 		c := controller.GetControllers()[name]
 		c.Start(controllerConfig)
 	}

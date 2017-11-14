@@ -23,14 +23,20 @@ func (p *Provisioner) Start(config *controller.Config) {
 	p.config.ClusterController.AddHandler(p.sync)
 }
 
-func configChanged(old *clusterv1.Cluster, current *clusterv1.Cluster) bool {
+func configChanged(cluster *clusterv1.Cluster) bool {
 	changed := false
-	if current.Spec.AKSConfig != nil {
-		changed = !reflect.DeepEqual(current.Spec.AKSConfig, old.Spec.AKSConfig)
-	} else if current.Spec.GKEConfig != nil {
-		changed = !reflect.DeepEqual(current.Spec.GKEConfig, old.Spec.GKEConfig)
-	} else if current.Spec.AKSConfig != nil {
-		changed = !reflect.DeepEqual(current.Spec.AKSConfig, old.Spec.AKSConfig)
+	if cluster.Spec.AzureKubernetesServiceConfig != nil {
+		applied := cluster.Status.AppliedSpec.AzureKubernetesServiceConfig
+		current := cluster.Spec.AzureKubernetesServiceConfig
+		changed = applied != nil && !reflect.DeepEqual(applied, current)
+	} else if cluster.Spec.GoogleKubernetesEngineConfig != nil {
+		applied := cluster.Status.AppliedSpec.GoogleKubernetesEngineConfig
+		current := cluster.Spec.GoogleKubernetesEngineConfig
+		changed = applied != nil && !reflect.DeepEqual(applied, current)
+	} else if cluster.Spec.RKEConfig != nil {
+		applied := cluster.Status.AppliedSpec.RKEConfig
+		current := cluster.Spec.RKEConfig
+		changed = applied != nil && !reflect.DeepEqual(applied, current)
 	}
 
 	return changed
@@ -43,8 +49,11 @@ func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 	} else {
 		// TODO check delete annotation, and call delete method if present
 		// otherwise call create/update
-		return p.createOrUpdateCluster(cluster)
+		if configChanged(cluster) {
+			return p.createOrUpdateCluster(cluster)
+		}
 	}
+	return nil
 }
 
 func (p *Provisioner) deleteCluster(key string) error {
