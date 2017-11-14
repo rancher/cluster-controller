@@ -5,7 +5,10 @@ import (
 
 	"reflect"
 
+	"fmt"
+
 	"github.com/rancher/cluster-controller/controller"
+	driver "github.com/rancher/kontainer-engine/stub"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 )
 
@@ -25,6 +28,9 @@ func (p *Provisioner) Start(config *controller.Config) {
 
 func configChanged(cluster *clusterv1.Cluster) bool {
 	changed := false
+	if cluster.Status == nil {
+		return true
+	}
 	if cluster.Spec.AzureKubernetesServiceConfig != nil {
 		applied := cluster.Status.AppliedSpec.AzureKubernetesServiceConfig
 		current := cluster.Spec.AzureKubernetesServiceConfig
@@ -33,9 +39,9 @@ func configChanged(cluster *clusterv1.Cluster) bool {
 		applied := cluster.Status.AppliedSpec.GoogleKubernetesEngineConfig
 		current := cluster.Spec.GoogleKubernetesEngineConfig
 		changed = applied != nil && !reflect.DeepEqual(applied, current)
-	} else if cluster.Spec.RKEConfig != nil {
-		applied := cluster.Status.AppliedSpec.RKEConfig
-		current := cluster.Spec.RKEConfig
+	} else if cluster.Spec.RancherKubernetesEngineConfig != nil {
+		applied := cluster.Status.AppliedSpec.RancherKubernetesEngineConfig
+		current := cluster.Spec.RancherKubernetesEngineConfig
 		changed = applied != nil && !reflect.DeepEqual(applied, current)
 	}
 
@@ -45,13 +51,13 @@ func configChanged(cluster *clusterv1.Cluster) bool {
 func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 	if cluster == nil {
 		// no longer exists if nil is passed to this call
+		// do nothing
 		return nil
-	} else {
-		// TODO check delete annotation, and call delete method if present
-		// otherwise call create/update
-		if configChanged(cluster) {
-			return p.createOrUpdateCluster(cluster)
-		}
+	}
+	// TODO check delete annotation, and call delete method if present
+	// otherwise call create/update
+	if configChanged(cluster) {
+		return p.createOrUpdateCluster(cluster)
 	}
 	return nil
 }
@@ -64,6 +70,10 @@ func (p *Provisioner) deleteCluster(key string) error {
 
 func (p *Provisioner) createOrUpdateCluster(cluster *clusterv1.Cluster) error {
 	logrus.Infof("Updating cluster [%s]", cluster.Name)
+	_, _, _, err := driver.Create(cluster.Name, cluster.Spec)
+	if err != nil {
+		return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
+	}
 	logrus.Infof("Updated cluster [%s]", cluster.Name)
 	return nil
 }
