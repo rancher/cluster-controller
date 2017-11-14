@@ -21,9 +21,7 @@ type Config struct {
 
 type Controller interface {
 	GetName() string
-	Run(ctx context.Context) error
-	Init(config string) error
-	Shutdown()
+	Start(config *Config)
 }
 
 var (
@@ -42,5 +40,34 @@ func RegisterController(name string, controller Controller) error {
 		return fmt.Errorf("controller already registered")
 	}
 	controllers[name] = controller
+	return nil
+}
+
+func NewControllerConfig(config string) (*Config, error) {
+	clientSet, err := client.NewClientSetV1(config)
+	if err != nil {
+		return nil, err
+	}
+
+	controllerCfg := &Config{
+		ClientSet: clientSet,
+	}
+
+	controllerCfg.ClusterController = clientSet.ClusterClientV1.Clusters("").Controller()
+	controllerCfg.ClusterNodeController = clientSet.ClusterClientV1.ClusterNodes("").Controller()
+
+	return controllerCfg, nil
+}
+
+func (c *Config) Run(ctx context.Context) error {
+	err := c.ClusterController.Start(1, ctx)
+	if err != nil {
+		return err
+	}
+
+	err = c.ClusterNodeController.Start(1, ctx)
+	if err != nil {
+		return err
+	}
 	return nil
 }

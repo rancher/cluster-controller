@@ -23,26 +23,32 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		return runControllers(c.String("config"))
+		runControllers(c.String("config"))
+		return nil
 	}
 	app.Run(os.Args)
 }
 
-func runControllers(config string) error {
+func runControllers(config string) {
 	logrus.Info("Staring cluster manager")
 	ctx, cancel := context.WithCancel(context.Background())
 	wg, ctx := errgroup.WithContext(ctx)
+
+	logrus.Info("Creating controller config")
+	controllerConfig, err := controller.NewControllerConfig(config)
+	if err != nil {
+		logrus.Fatalf("Failed to create controller config: [%v]", err)
+	}
+	logrus.Info("Created controller config")
 
 	logrus.Info("Staring controllers")
 	for name := range controller.GetControllers() {
 		logrus.Infof("Starting [%s] controller", name)
 		c := controller.GetControllers()[name]
-		err := c.Init(config)
-		if err != nil {
-			return err
-		}
-		wg.Go(func() error { return c.Run(ctx) })
+		c.Start(controllerConfig)
 	}
+
+	wg.Go(func() error { return controllerConfig.Run(ctx) })
 
 	term := make(chan os.Signal)
 	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
@@ -54,15 +60,10 @@ func runControllers(config string) error {
 	}
 
 	cancel()
-	for name, c := range controller.GetControllers() {
-		logrus.Infof("Shutting down [%s] controller", name)
-		c.Shutdown()
-	}
 
 	if err := wg.Wait(); err != nil {
 		logrus.Errorf("Unhandled error received, shutting down: [%v]", err)
 		os.Exit(1)
 	}
 	os.Exit(0)
-	return nil
 }

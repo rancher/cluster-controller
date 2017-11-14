@@ -1,18 +1,16 @@
 package provisioner
 
 import (
-	"context"
+	"github.com/sirupsen/logrus"
 
 	"reflect"
 
-	"github.com/rancher/cluster-controller/client"
 	"github.com/rancher/cluster-controller/controller"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 )
 
 type Provisioner struct {
-	clientSet         *client.V1
-	clusterController clusterv1.ClusterController
+	config *controller.Config
 }
 
 func init() {
@@ -20,15 +18,9 @@ func init() {
 	controller.RegisterController(p.GetName(), p)
 }
 
-func (p *Provisioner) Init(config string) error {
-	clientSet, err := client.NewClientSetV1(config)
-	if err != nil {
-		return err
-	}
-	p.clientSet = clientSet
-	p.clusterController = p.clientSet.ClusterClientV1.Clusters("").Controller()
-	p.clusterController.AddHandler(p.sync)
-	return nil
+func (p *Provisioner) Start(config *controller.Config) {
+	p.config = config
+	p.config.ClusterController.AddHandler(p.sync)
 }
 
 func configChanged(old *clusterv1.Cluster, current *clusterv1.Cluster) bool {
@@ -56,20 +48,17 @@ func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 }
 
 func (p *Provisioner) deleteCluster(key string) error {
+	logrus.Infof("Deleting cluster [%s]", key)
+	logrus.Infof("Deleted cluster [%s]", key)
 	return nil
 }
 
 func (p *Provisioner) createOrUpdateCluster(cluster *clusterv1.Cluster) error {
+	logrus.Infof("Updating cluster [%s]", cluster.Name)
+	logrus.Infof("Updated cluster [%s]", cluster.Name)
 	return nil
-}
-
-func (p *Provisioner) Run(ctx context.Context) error {
-	return p.clusterController.Start(1, ctx)
 }
 
 func (p *Provisioner) GetName() string {
 	return "clusterProvisioner"
-}
-
-func (p *Provisioner) Shutdown() {
 }
