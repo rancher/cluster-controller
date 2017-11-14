@@ -23,31 +23,25 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		runControllers(c.String("config"))
-		return nil
+		return runControllers(c.String("config"))
 	}
 	app.Run(os.Args)
 }
 
-func runControllers(config string) {
+func runControllers(config string) error {
 	logrus.Info("Staring cluster manager")
 	ctx, cancel := context.WithCancel(context.Background())
 	wg, ctx := errgroup.WithContext(ctx)
-
-	logrus.Info("Creating controller config")
-	controllerConfig, err := controller.NewControllerConfig(config)
-	if err != nil {
-		logrus.Fatalf("Failed to create controller config: [%v]", err)
-	}
-	logrus.Info("Created controller config")
-	wg.Go(func() error { return controllerConfig.Run(ctx.Done()) })
 
 	logrus.Info("Staring controllers")
 	for name := range controller.GetControllers() {
 		logrus.Infof("Starting [%s] controller", name)
 		c := controller.GetControllers()[name]
-		c.Init(controllerConfig)
-		wg.Go(func() error { return c.Run(ctx.Done()) })
+		err := c.Init(config)
+		if err != nil {
+			return err
+		}
+		wg.Go(func() error { return c.Run(ctx) })
 	}
 
 	term := make(chan os.Signal)
@@ -70,4 +64,5 @@ func runControllers(config string) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+	return nil
 }

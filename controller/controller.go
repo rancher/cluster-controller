@@ -1,11 +1,12 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	client "github.com/rancher/cluster-controller/client"
-	"k8s.io/client-go/tools/cache"
+	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 )
 
 const (
@@ -13,15 +14,15 @@ const (
 )
 
 type Config struct {
-	ClientSet           *client.V1
-	ClusterInformer     cache.SharedIndexInformer
-	ClusterNodeInformer cache.SharedIndexInformer
+	ClientSet             *client.V1
+	ClusterController     clusterv1.ClusterController
+	ClusterNodeController clusterv1.ClusterNodeController
 }
 
 type Controller interface {
 	GetName() string
-	Run(stopc <-chan struct{}) error
-	Init(config *Config)
+	Run(ctx context.Context) error
+	Init(config string) error
 	Shutdown()
 }
 
@@ -41,27 +42,5 @@ func RegisterController(name string, controller Controller) error {
 		return fmt.Errorf("controller already registered")
 	}
 	controllers[name] = controller
-	return nil
-}
-
-func NewControllerConfig(config string) (*Config, error) {
-	clientSet, err := client.NewClientSetV1(config)
-	if err != nil {
-		return nil, err
-	}
-
-	controllerCfg := &Config{
-		ClientSet: clientSet,
-	}
-
-	controllerCfg.ClusterInformer = clientSet.ClusterClientV1.Clusters("").Controller().Informer()
-	controllerCfg.ClusterNodeInformer = clientSet.ClusterClientV1.ClusterNodes("").Controller().Informer()
-
-	return controllerCfg, nil
-}
-
-func (c *Config) Run(stopc <-chan struct{}) error {
-	c.ClusterInformer.Run(stopc)
-	c.ClusterNodeInformer.Run(stopc)
 	return nil
 }
