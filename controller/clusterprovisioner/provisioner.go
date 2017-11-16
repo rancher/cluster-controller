@@ -67,6 +67,7 @@ func getAction(cluster *clusterv1.Cluster) string {
 		return CreateAction
 	}
 	//TODO return remove action based on removed timestamp flag
+	// add finalizer logic
 	if configChanged(cluster) {
 		return UpdateAction
 	}
@@ -144,7 +145,7 @@ func (p *Provisioner) postUpdateClusterStatusError(cluster *clusterv1.Cluster, u
 	if err != nil {
 		return err
 	}
-	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "False", fmt.Sprintf("Failed to update cluster %s", userError.Error()))
+	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "True", fmt.Sprintf("Failed to update cluster %s", userError.Error()))
 	setClusterCondition(&toUpdate.Status, condition)
 	_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(toUpdate)
 	return err
