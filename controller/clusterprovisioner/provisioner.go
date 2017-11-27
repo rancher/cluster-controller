@@ -1,6 +1,7 @@
 package provisioner
 
 import (
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -66,8 +67,9 @@ func getAction(cluster *clusterv1.Cluster) string {
 	if rkeNil && aksNil && gkeNil {
 		return CreateAction
 	}
-	//TODO return remove action based on removed timestamp flag
-	// add finalizer logic
+	if cluster.ObjectMeta.DeletionTimestamp != nil {
+		return RemoveAction
+	}
 	if configChanged(cluster) {
 		return UpdateAction
 	}
@@ -89,13 +91,49 @@ func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 }
 
 func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
-	logrus.Infof("Deleting cluster [%s]", cluster.Name)
-	err := driver.Remove(cluster.Name, cluster.Spec)
-	if err != nil {
-		return fmt.Errorf("Failed to remove the cluster [%s]: %v", cluster.Name, err)
+	set, first := p.finalizerSet(cluster)
+	if set && first {
+		logrus.Infof("Deleting cluster [%s]", cluster.Name)
+		// 1. Call the driver to remove the cluster
+		err := driver.Remove(cluster.Name, cluster.Spec)
+		if err != nil {
+			return fmt.Errorf("Failed to remove the cluster [%s]: %v", cluster.Name, err)
+		}
+
+		// 2. Remove cluster nodes
+		nodes, err := p.getClusterNodes(cluster)
+		if err != nil {
+			return fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
+		}
+		for _, node := range nodes {
+			if err = p.config.ClientSet.ClusterClientV1.ClusterNodes("").Delete(node.Name, &metav1.DeleteOptions{}); err != nil {
+				return fmt.Errorf("Failed to remove cluster node [%s] for cluster [%s]: %v", node.Name, cluster.Name, err)
+			}
+		}
+		// 3. Remove k8s object
+		cluster.ObjectMeta.Finalizers = []string{}
+		_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(cluster)
+		if err != nil {
+			return fmt.Errorf("Failed to reset finalizers for cluster [%s]: %v", cluster.Name, err)
+		}
+		logrus.Infof("Deleted cluster [%s]", cluster.Name)
 	}
-	logrus.Infof("Deleted cluster [%s]", cluster.Name)
+
 	return nil
+}
+
+func (p *Provisioner) getClusterNodes(cluster *clusterv1.Cluster) ([]clusterv1.ClusterNode, error) {
+	var nodes []clusterv1.ClusterNode
+	all, err := p.config.ClientSet.ClusterClientV1.ClusterNodes("").List(metav1.ListOptions{})
+	if err != nil {
+		return nodes, fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
+	}
+	for _, node := range all.Items {
+		if strings.HasPrefix(node.Name, fmt.Sprintf("%s-", cluster.Name)) {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes, nil
 }
 
 func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
@@ -202,8 +240,24 @@ func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
 		setClusterCondition(&toUpdate.Status, condition)
 	}
 
+	set, _ := p.finalizerSet(toUpdate)
+
+	if !set {
+		toUpdate.ObjectMeta.Finalizers = append(toUpdate.ObjectMeta.Finalizers, p.GetName())
+	}
 	_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(toUpdate)
 	return err
+}
+
+func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, bool) {
+	i := 0
+	for _, value := range cluster.ObjectMeta.Finalizers {
+		if value == p.GetName() {
+			return true, i == 0
+		}
+		i++
+	}
+	return false, false
 }
 
 func setClusterCondition(status *clusterv1.ClusterStatus, c clusterv1.ClusterCondition) {
