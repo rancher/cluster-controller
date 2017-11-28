@@ -14,8 +14,7 @@ type Interface interface {
 	RESTClient() rest.Interface
 	controller.Starter
 
-	ClustersGetter
-	ClusterNodesGetter
+	WorkloadsGetter
 }
 
 type Client struct {
@@ -23,8 +22,7 @@ type Client struct {
 	restClient rest.Interface
 	starters   []controller.Starter
 
-	clusterControllers     map[string]ClusterController
-	clusterNodeControllers map[string]ClusterNodeController
+	workloadControllers map[string]WorkloadController
 }
 
 func NewForConfig(config rest.Config) (Interface, error) {
@@ -41,8 +39,7 @@ func NewForConfig(config rest.Config) (Interface, error) {
 	return &Client{
 		restClient: restClient,
 
-		clusterControllers:     map[string]ClusterController{},
-		clusterNodeControllers: map[string]ClusterNodeController{},
+		workloadControllers: map[string]WorkloadController{},
 	}, nil
 }
 
@@ -58,26 +55,13 @@ func (c *Client) Start(ctx context.Context, threadiness int) error {
 	return controller.Start(ctx, threadiness, c.starters...)
 }
 
-type ClustersGetter interface {
-	Clusters(namespace string) ClusterInterface
+type WorkloadsGetter interface {
+	Workloads(namespace string) WorkloadInterface
 }
 
-func (c *Client) Clusters(namespace string) ClusterInterface {
-	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &ClusterResource, ClusterGroupVersionKind, clusterFactory{})
-	return &clusterClient{
-		ns:           namespace,
-		client:       c,
-		objectClient: objectClient,
-	}
-}
-
-type ClusterNodesGetter interface {
-	ClusterNodes(namespace string) ClusterNodeInterface
-}
-
-func (c *Client) ClusterNodes(namespace string) ClusterNodeInterface {
-	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &ClusterNodeResource, ClusterNodeGroupVersionKind, clusterNodeFactory{})
-	return &clusterNodeClient{
+func (c *Client) Workloads(namespace string) WorkloadInterface {
+	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &WorkloadResource, WorkloadGroupVersionKind, workloadFactory{})
+	return &workloadClient{
 		ns:           namespace,
 		client:       c,
 		objectClient: objectClient,

@@ -1,4 +1,4 @@
-package v1
+package v1beta2
 
 import (
 	"context"
@@ -14,8 +14,7 @@ type Interface interface {
 	RESTClient() rest.Interface
 	controller.Starter
 
-	ClustersGetter
-	ClusterNodesGetter
+	DeploymentsGetter
 }
 
 type Client struct {
@@ -23,8 +22,7 @@ type Client struct {
 	restClient rest.Interface
 	starters   []controller.Starter
 
-	clusterControllers     map[string]ClusterController
-	clusterNodeControllers map[string]ClusterNodeController
+	deploymentControllers map[string]DeploymentController
 }
 
 func NewForConfig(config rest.Config) (Interface, error) {
@@ -41,8 +39,7 @@ func NewForConfig(config rest.Config) (Interface, error) {
 	return &Client{
 		restClient: restClient,
 
-		clusterControllers:     map[string]ClusterController{},
-		clusterNodeControllers: map[string]ClusterNodeController{},
+		deploymentControllers: map[string]DeploymentController{},
 	}, nil
 }
 
@@ -58,26 +55,13 @@ func (c *Client) Start(ctx context.Context, threadiness int) error {
 	return controller.Start(ctx, threadiness, c.starters...)
 }
 
-type ClustersGetter interface {
-	Clusters(namespace string) ClusterInterface
+type DeploymentsGetter interface {
+	Deployments(namespace string) DeploymentInterface
 }
 
-func (c *Client) Clusters(namespace string) ClusterInterface {
-	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &ClusterResource, ClusterGroupVersionKind, clusterFactory{})
-	return &clusterClient{
-		ns:           namespace,
-		client:       c,
-		objectClient: objectClient,
-	}
-}
-
-type ClusterNodesGetter interface {
-	ClusterNodes(namespace string) ClusterNodeInterface
-}
-
-func (c *Client) ClusterNodes(namespace string) ClusterNodeInterface {
-	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &ClusterNodeResource, ClusterNodeGroupVersionKind, clusterNodeFactory{})
-	return &clusterNodeClient{
+func (c *Client) Deployments(namespace string) DeploymentInterface {
+	objectClient := clientbase.NewObjectClient(namespace, c.restClient, &DeploymentResource, DeploymentGroupVersionKind, deploymentFactory{})
+	return &deploymentClient{
 		ns:           namespace,
 		client:       c,
 		objectClient: objectClient,
