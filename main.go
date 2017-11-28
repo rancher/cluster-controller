@@ -1,15 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
-	controller "github.com/rancher/cluster-controller/controller"
-	"github.com/sirupsen/logrus"
+	"github.com/rancher/cluster-controller/controller"
+	"github.com/rancher/types/config"
 	"github.com/urfave/cli"
-	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func main() {
@@ -23,46 +20,24 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		runControllers(c.String("config"))
-		return nil
+		return run(c.String("config"))
 	}
+
 	app.Run(os.Args)
 }
 
-func runControllers(config string) {
-	logrus.Info("Staring cluster manager")
-	ctx, cancel := context.WithCancel(context.Background())
-	wg, ctx := errgroup.WithContext(ctx)
-
-	logrus.Info("Creating controller config")
-	controllerConfig, err := controller.NewControllerConfig(config)
+func run(kubeConfigFile string) error {
+	kubeConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigFile)
 	if err != nil {
-		logrus.Fatalf("Failed to create controller config: [%v]", err)
-	}
-	logrus.Info("Created controller config")
-
-	for name := range controller.GetControllers() {
-		logrus.Infof("Adding [%s] handler", name)
-		c := controller.GetControllers()[name]
-		c.Start(controllerConfig)
+		return err
 	}
 
-	wg.Go(func() error { return controllerConfig.Run(ctx) })
-
-	term := make(chan os.Signal)
-	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
-
-	select {
-	case <-term:
-		logrus.Infof("Received SIGTERM, shutting down")
-	case <-ctx.Done():
+	cluster, err := config.NewClusterContext(*kubeConfig)
+	if err != nil {
+		return err
 	}
 
-	cancel()
+	controller.Register(cluster)
 
-	if err := wg.Wait(); err != nil {
-		logrus.Errorf("Unhandled error received, shutting down: [%v]", err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return cluster.StartAndWait()
 }

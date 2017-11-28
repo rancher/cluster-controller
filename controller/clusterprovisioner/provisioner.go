@@ -1,18 +1,15 @@
-package provisioner
+package clusterprovisioner
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
-	"reflect"
-
-	"fmt"
-
-	"github.com/rancher/cluster-controller/controller"
 	driver "github.com/rancher/kontainer-engine/stub"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
+	"github.com/rancher/types/config"
+	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -25,17 +22,16 @@ const (
 )
 
 type Provisioner struct {
-	config *controller.Config
+	ClusterNodes clusterv1.ClusterNodeInterface
+	Clusters     clusterv1.ClusterInterface
 }
 
-func init() {
-	p := &Provisioner{}
-	controller.RegisterController(p.GetName(), p)
-}
-
-func (p *Provisioner) Start(config *controller.Config) {
-	p.config = config
-	p.config.ClusterController.AddHandler(p.sync)
+func Register(cluster *config.ClusterContext) {
+	p := &Provisioner{
+		ClusterNodes: cluster.Cluster.ClusterNodes(""),
+		Clusters:     cluster.Cluster.Clusters(""),
+	}
+	cluster.Cluster.Clusters("").Controller().AddHandler(p.sync)
 }
 
 func configChanged(cluster *clusterv1.Cluster) bool {
@@ -106,13 +102,13 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 			return fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
 		}
 		for _, node := range nodes {
-			if err = p.config.ClientSet.ClusterClientV1.ClusterNodes("").Delete(node.Name, &metav1.DeleteOptions{}); err != nil {
+			if err = p.ClusterNodes.Delete(node.Name, &metav1.DeleteOptions{}); err != nil {
 				return fmt.Errorf("Failed to remove cluster node [%s] for cluster [%s]: %v", node.Name, cluster.Name, err)
 			}
 		}
 		// 3. Remove k8s object
 		cluster.ObjectMeta.Finalizers = []string{}
-		_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(cluster)
+		_, err = p.Clusters.Update(cluster)
 		if err != nil {
 			return fmt.Errorf("Failed to reset finalizers for cluster [%s]: %v", cluster.Name, err)
 		}
@@ -124,7 +120,7 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 
 func (p *Provisioner) getClusterNodes(cluster *clusterv1.Cluster) ([]clusterv1.ClusterNode, error) {
 	var nodes []clusterv1.ClusterNode
-	all, err := p.config.ClientSet.ClusterClientV1.ClusterNodes("").List(metav1.ListOptions{})
+	all, err := p.ClusterNodes.List(metav1.ListOptions{})
 	if err != nil {
 		return nodes, fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -179,18 +175,18 @@ func (p *Provisioner) GetName() string {
 }
 
 func (p *Provisioner) postUpdateClusterStatusError(cluster *clusterv1.Cluster, userError error) error {
-	toUpdate, err := p.config.ClientSet.ClusterClientV1.Clusters("").Get(cluster.Name, metav1.GetOptions{})
+	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "True", fmt.Sprintf("Failed to update cluster %s", userError.Error()))
 	setClusterCondition(&toUpdate.Status, condition)
-	_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(toUpdate)
+	_, err = p.Clusters.Update(toUpdate)
 	return err
 }
 
 func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster, apiEndpiont string, serviceAccountToken string, caCert string, create bool) error {
-	toUpdate, err := p.config.ClientSet.ClusterClientV1.Clusters("").Get(cluster.Name, metav1.GetOptions{})
+	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -205,7 +201,7 @@ func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster,
 
 	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "False", "Cluster updated successfully")
 	setClusterCondition(&toUpdate.Status, condition)
-	_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(toUpdate)
+	_, err = p.Clusters.Update(toUpdate)
 	return err
 }
 
@@ -221,7 +217,7 @@ func newClusterCondition(condType clusterv1.ClusterConditionType, status v1.Cond
 }
 
 func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
-	toUpdate, err := p.config.ClientSet.ClusterClientV1.Clusters("").Get(clusterName, metav1.GetOptions{})
+	toUpdate, err := p.Clusters.Get(clusterName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
@@ -245,7 +241,7 @@ func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
 	if !set {
 		toUpdate.ObjectMeta.Finalizers = append(toUpdate.ObjectMeta.Finalizers, p.GetName())
 	}
-	_, err = p.config.ClientSet.ClusterClientV1.Clusters("").Update(toUpdate)
+	_, err = p.Clusters.Update(toUpdate)
 	return err
 }
 

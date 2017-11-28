@@ -1,4 +1,4 @@
-package statsaggregator
+package clusterstats
 
 import (
 	"encoding/json"
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rancher/cluster-controller/controller"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
+	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,7 +34,7 @@ const (
 )
 
 type StatsAggregator struct {
-	config *controller.Config
+	Clusters clusterv1.ClusterInterface
 }
 
 type ClusterNodeData struct {
@@ -46,19 +46,13 @@ type ClusterNodeData struct {
 
 var stats map[string]map[string]*ClusterNodeData
 
-func init() {
-	s := &StatsAggregator{}
-	controller.RegisterController(s.GetName(), s)
-}
-
-func (s *StatsAggregator) GetName() string {
-	return "clusterStatsAggregator"
-}
-
-func (s *StatsAggregator) Start(config *controller.Config) {
-	s.config = config
+func Register(cluster *config.ClusterContext) {
 	stats = make(map[string]map[string]*ClusterNodeData)
-	s.config.ClusterNodeController.AddHandler(s.sync)
+
+	s := &StatsAggregator{
+		Clusters: cluster.Cluster.Clusters(""),
+	}
+	cluster.Cluster.ClusterNodes("").Controller().AddHandler(s.sync)
 }
 
 func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) error {
@@ -167,12 +161,12 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 }
 
 func (s *StatsAggregator) update(cluster *clusterv1.Cluster) error {
-	_, err := s.config.ClientSet.ClusterClientV1.Clusters("").Update(cluster)
+	_, err := s.Clusters.Update(cluster)
 	return err
 }
 
 func (s *StatsAggregator) getCluster(clusterName string) (*clusterv1.Cluster, error) {
-	return s.config.ClientSet.ClusterClientV1.Clusters("").Get(clusterName, metav1.GetOptions{})
+	return s.Clusters.Get(clusterName, metav1.GetOptions{})
 }
 
 func mp(i interface{}, msg string) {
