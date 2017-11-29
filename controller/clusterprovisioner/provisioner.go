@@ -57,15 +57,14 @@ func getAction(cluster *clusterv1.Cluster) string {
 	if cluster == nil {
 		return NoopAction
 	}
-	rkeNil := cluster.Status.AppliedSpec.RancherKubernetesEngineConfig == nil
-	aksNil := cluster.Status.AppliedSpec.AzureKubernetesServiceConfig == nil
-	gkeNil := cluster.Status.AppliedSpec.GoogleKubernetesEngineConfig == nil
-	if rkeNil && aksNil && gkeNil {
-		return CreateAction
-	}
 	if cluster.ObjectMeta.DeletionTimestamp != nil {
 		return RemoveAction
 	}
+
+	if !isClusterProvisioned(cluster) {
+		return CreateAction
+	}
+
 	if configChanged(cluster) {
 		return UpdateAction
 	}
@@ -91,9 +90,17 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 	if set && first {
 		logrus.Infof("Deleting cluster [%s]", cluster.Name)
 		// 1. Call the driver to remove the cluster
-		err := driver.Remove(cluster.Name, cluster.Spec)
-		if err != nil {
-			return fmt.Errorf("Failed to remove the cluster [%s]: %v", cluster.Name, err)
+		if isClusterProvisioned(cluster) {
+			for i := 0; i < 4; i++ {
+				err := driver.Remove(cluster.Name, cluster.Spec)
+				if err == nil {
+					break
+				}
+				if i == 3 {
+					return fmt.Errorf("Failed to remove the cluster [%s]: %v", cluster.Name, err)
+				}
+				time.Sleep(1 * time.Second)
+			}
 		}
 
 		// 2. Remove cluster nodes
@@ -143,7 +150,7 @@ func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
 		_ = p.postUpdateClusterStatusError(cluster, err)
 		return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
 	}
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert, false)
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -162,7 +169,7 @@ func (p *Provisioner) createCluster(cluster *clusterv1.Cluster) error {
 		_ = p.postUpdateClusterStatusError(cluster, err)
 		return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
 	}
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert, true)
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -185,7 +192,7 @@ func (p *Provisioner) postUpdateClusterStatusError(cluster *clusterv1.Cluster, u
 	return err
 }
 
-func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster, apiEndpiont string, serviceAccountToken string, caCert string, create bool) error {
+func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster, apiEndpiont string, serviceAccountToken string, caCert string) error {
 	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -194,7 +201,7 @@ func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster,
 	toUpdate.Status.APIEndpoint = apiEndpiont
 	toUpdate.Status.ServiceAccountToken = serviceAccountToken
 	toUpdate.Status.CACert = caCert
-	if create {
+	if !isClusterProvisioned(cluster) {
 		condition := newClusterCondition(clusterv1.ClusterConditionProvisioned, "True", "Cluster providioned successfully")
 		setClusterCondition(&toUpdate.Status, condition)
 	}
@@ -276,4 +283,12 @@ func getClusterCondition(status *clusterv1.ClusterStatus, t clusterv1.ClusterCon
 		}
 	}
 	return -1, nil
+}
+
+func isClusterProvisioned(cluster *clusterv1.Cluster) bool {
+	_, isProvisioned := getClusterCondition(&cluster.Status, clusterv1.ClusterConditionProvisioned)
+	if isProvisioned == nil {
+		return false
+	}
+	return isProvisioned.Status == "True"
 }
