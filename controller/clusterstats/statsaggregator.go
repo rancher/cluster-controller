@@ -19,13 +19,13 @@ const (
 	NodeMemoryPressure v1.NodeConditionType = "MemoryPressure"
 	// NodeDiskPressure means the kubelet is under pressure due to insufficient available disk.
 	NodeDiskPressure v1.NodeConditionType = "DiskPressure"
-	// Pods, number
+	// ResourcePods number
 	ResourcePods v1.ResourceName = "pods"
-	// CPU, in cores. (500m = .5 cores)
+	// ResourceCPU in cores. (500m = .5 cores)
 	ResourceCPU v1.ResourceName = "cpu"
-	// Memory, in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
+	// ResourceMemory in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
 	ResourceMemory v1.ResourceName = "memory"
-	// ClusterConditionNoMemoryPressure true when all cluster nodes have sufficient memory
+	// ClusterConditionNoDiskPressure true when all cluster nodes have sufficient memory
 	ClusterConditionNoDiskPressure = "NoDiskPressure"
 	// ClusterConditionNoMemoryPressure true when all cluster nodes have sufficient memory
 	ClusterConditionNoMemoryPressure                    = "NoMemoryPressure"
@@ -59,9 +59,8 @@ func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) e
 	logrus.Infof("Syncing clusternode name [%s]", key)
 	if clusterNode == nil {
 		return s.deleteStats(key)
-	} else {
-		return s.addOrUpdateStats(clusterNode)
 	}
+	return s.addOrUpdateStats(clusterNode)
 }
 
 func (s *StatsAggregator) deleteStats(key string) error {
