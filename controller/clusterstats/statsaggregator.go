@@ -45,7 +45,7 @@ func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) e
 }
 
 func (s *StatsAggregator) deleteStats(key string) error {
-	clusterName, clusterNodeName, err := getNames("mycluster3-minikube")
+	clusterName, clusterNodeName, err := getNames(key)
 	if err != nil {
 		return err
 	}
@@ -56,8 +56,8 @@ func (s *StatsAggregator) deleteStats(key string) error {
 	oldData := stats[clusterName][clusterNodeName]
 	if _, exists := stats[clusterName][clusterNodeName]; exists {
 		delete(stats[clusterName], clusterNodeName)
+		logrus.Infof("ClusterNode [%s] deleted", key)
 	}
-	logrus.Infof("ClusterNode [%s] deleted", key)
 	s.aggregate(cluster, clusterName)
 	err = s.update(cluster)
 	if err != nil {
@@ -91,8 +91,6 @@ func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) e
 	stats[clusterName][clusterNodeName] = newData
 	s.aggregate(cluster, clusterName)
 
-	// testing
-	stats[clusterName]["kinara"] = newData
 	err = s.update(cluster)
 	if err != nil {
 		stats[clusterName][clusterNodeName] = oldData
@@ -111,8 +109,7 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 	condDisk := v1.ConditionTrue
 	condMem := v1.ConditionTrue
 
-	for name, v := range stats[clusterName] {
-		logrus.Infof("name %v", name)
+	for _, v := range stats[clusterName] {
 		pods.Add(*v.Capacity.Pods())
 		mem.Add(*v.Capacity.Memory())
 		cpu.Add(*v.Capacity.Cpu())
@@ -133,11 +130,8 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 	cluster.Status.Capacity = v1.ResourceList{v1.ResourcePods: pods, v1.ResourceMemory: mem, v1.ResourceCPU: cpu}
 	cluster.Status.Allocatable = v1.ResourceList{v1.ResourcePods: apods, v1.ResourceMemory: amem, v1.ResourceCPU: acpu}
 
-	mp(cluster.Status.Capacity, "capacity")
-
 	setConditionStatus(cluster, clusterv1.ClusterConditionNoDiskPressure, condDisk)
 	setConditionStatus(cluster, clusterv1.ClusterConditionNoMemoryPressure, condMem)
-
 }
 
 func (s *StatsAggregator) update(cluster *clusterv1.Cluster) error {
