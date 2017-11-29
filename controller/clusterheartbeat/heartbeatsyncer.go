@@ -1,10 +1,10 @@
-package heartbeatsyncer
+package clusterheartbeat
 
 import (
 	"time"
 
-	"github.com/rancher/cluster-controller/controller"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
+	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,19 +19,17 @@ const (
 var clusterToLastUpdated map[string]time.Time
 
 type HeartBeatSyncer struct {
-	config *controller.Config
+	ClusterClient clusterv1.ClusterInterface
 }
 
-func init() {
-	h := &HeartBeatSyncer{}
-	controller.RegisterController(h.GetName(), h)
+func Register(cluster *config.ClusterContext) {
+	h := &HeartBeatSyncer{
+		ClusterClient: cluster.Cluster.Clusters(""),
+	}
+	cluster.Cluster.Clusters("").Controller().AddHandler(h.sync)
+
 	clusterToLastUpdated = make(map[string]time.Time)
 	go h.syncHeartBeat(syncInterval)
-}
-
-func (h *HeartBeatSyncer) Start(config *controller.Config) {
-	h.config = config
-	h.config.ClusterController.AddHandler(h.sync)
 }
 
 func (h *HeartBeatSyncer) sync(key string, cluster *clusterv1.Cluster) error {
@@ -63,7 +61,7 @@ func (h *HeartBeatSyncer) syncHeartBeat(syncInterval time.Duration) {
 func (h *HeartBeatSyncer) checkHeartBeat() {
 	for clusterName, lastUpdatedTime := range clusterToLastUpdated {
 		if lastUpdatedTime.Add(syncInterval).Before(time.Now().UTC()) {
-			cluster, err := h.config.ClientSet.ClusterClientV1.Clusters("").Get(clusterName, metav1.GetOptions{})
+			cluster, err := h.ClusterClient.Get(clusterName, metav1.GetOptions{})
 			if err != nil {
 				logrus.Infof("Error getting Cluster [%s] - %v", clusterName, err)
 				continue
@@ -72,10 +70,6 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 			logrus.Infof("Cluster [%s] condition status unknown", clusterName)
 		}
 	}
-}
-
-func (h *HeartBeatSyncer) GetName() string {
-	return "clusterHeartBeatSyncer"
 }
 
 func getConditionByType(cluster *clusterv1.Cluster, conditionType clusterv1.ClusterConditionType) *clusterv1.ClusterCondition {
