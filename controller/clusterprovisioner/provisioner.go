@@ -7,6 +7,7 @@ import (
 	"time"
 
 	driver "github.com/rancher/kontainer-engine/stub"
+	"github.com/rancher/rke/k8s"
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
@@ -143,7 +144,11 @@ func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
 		_ = p.postUpdateClusterStatusError(cluster, err)
 		return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
 	}
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert, false)
+	secretName, err := p.setSecret(cluster, "serviceaccounttoken", serviceAccountToken)
+	if err != nil {
+		return fmt.Errorf("Error updating cluster [%s] secrets %v", cluster.Name, err)
+	}
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, secretName, caCert, false)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -162,7 +167,11 @@ func (p *Provisioner) createCluster(cluster *clusterv1.Cluster) error {
 		_ = p.postUpdateClusterStatusError(cluster, err)
 		return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
 	}
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert, true)
+	secretName, err := p.setSecret(cluster, "serviceaccounttoken", serviceAccountToken)
+	if err != nil {
+		return fmt.Errorf("Error updating cluster [%s] secrets %v", cluster.Name, err)
+	}
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, secretName, caCert, true)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -192,7 +201,7 @@ func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster,
 	}
 	toUpdate.Status.AppliedSpec = cluster.Spec
 	toUpdate.Status.APIEndpoint = apiEndpiont
-	toUpdate.Status.ServiceAccountToken = serviceAccountToken
+	toUpdate.Status.ServiceAccountSecretName = serviceAccountToken
 	toUpdate.Status.CACert = caCert
 	if create {
 		condition := newClusterCondition(clusterv1.ClusterConditionProvisioned, "True", "Cluster providioned successfully")
@@ -254,6 +263,12 @@ func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, bool) {
 		i++
 	}
 	return false, false
+}
+
+func (p *Provisioner) setSecret(cluster *clusterv1.Cluster, suffix string, data string) (string, error) {
+	secretName := cluster.Name + "-" + suffix
+	err := k8s.UpdateSecret(p.config.ClientSet.CoreClientV1, suffix, []byte(data), secretName)
+	return secretName, err
 }
 
 func setClusterCondition(status *clusterv1.ClusterStatus, c clusterv1.ClusterCondition) {
