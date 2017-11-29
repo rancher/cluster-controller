@@ -90,7 +90,7 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 	if set && first {
 		logrus.Infof("Deleting cluster [%s]", cluster.Name)
 		// 1. Call the driver to remove the cluster
-		if isClusterProvisioned(cluster) {
+		if needToProvision(cluster) && isClusterProvisioned(cluster) {
 			for i := 0; i < 4; i++ {
 				err := driver.Remove(cluster.Name, cluster.Spec)
 				if err == nil {
@@ -145,11 +145,15 @@ func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
 	logrus.Infof("Updating cluster [%s]", cluster.Name)
-	apiEndpoint, serviceAccountToken, caCert, err := driver.Update(cluster.Name, cluster.Spec)
-	if err != nil {
-		_ = p.postUpdateClusterStatusError(cluster, err)
-		return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
+	var apiEndpoint, serviceAccountToken, caCert string
+	if needToProvision(cluster) {
+		apiEndpoint, serviceAccountToken, caCert, err = driver.Update(cluster.Name, cluster.Spec)
+		if err != nil {
+			_ = p.postUpdateClusterStatusError(cluster, err)
+			return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
+		}
 	}
+
 	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
@@ -164,11 +168,16 @@ func (p *Provisioner) createCluster(cluster *clusterv1.Cluster) error {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
 	logrus.Infof("Provisioning cluster [%s]", cluster.Name)
-	apiEndpoint, serviceAccountToken, caCert, err := driver.Create(cluster.Name, cluster.Spec)
-	if err != nil {
-		_ = p.postUpdateClusterStatusError(cluster, err)
-		return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
+
+	var apiEndpoint, serviceAccountToken, caCert string
+	if needToProvision(cluster) {
+		apiEndpoint, serviceAccountToken, caCert, err = driver.Create(cluster.Name, cluster.Spec)
+		if err != nil {
+			_ = p.postUpdateClusterStatusError(cluster, err)
+			return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
+		}
 	}
+
 	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
@@ -291,4 +300,8 @@ func isClusterProvisioned(cluster *clusterv1.Cluster) bool {
 		return false
 	}
 	return isProvisioned.Status == "True"
+}
+
+func needToProvision(cluster *clusterv1.Cluster) bool {
+	return cluster.Spec.RancherKubernetesEngineConfig != nil || cluster.Spec.AzureKubernetesServiceConfig != nil || cluster.Spec.GoogleKubernetesEngineConfig != nil
 }
