@@ -5,6 +5,7 @@ import (
 
 	"github.com/rancher/cluster-controller/controller"
 	"github.com/rancher/types/config"
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -21,6 +22,10 @@ func main() {
 
 	app.Action = func(c *cli.Context) error {
 		return run(c.String("config"))
+	}
+
+	app.ExitErrHandler = func(c *cli.Context, err error) {
+		logrus.Fatal(err)
 	}
 
 	app.Run(os.Args)
