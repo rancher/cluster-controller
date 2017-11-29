@@ -14,25 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	// NodeMemoryPressure means the kubelet is under pressure due to insufficient available memory.
-	NodeMemoryPressure v1.NodeConditionType = "MemoryPressure"
-	// NodeDiskPressure means the kubelet is under pressure due to insufficient available disk.
-	NodeDiskPressure v1.NodeConditionType = "DiskPressure"
-	// ResourcePods number
-	ResourcePods v1.ResourceName = "pods"
-	// ResourceCPU in cores. (500m = .5 cores)
-	ResourceCPU v1.ResourceName = "cpu"
-	// ResourceMemory in bytes. (500Gi = 500GiB = 500 * 1024 * 1024 * 1024)
-	ResourceMemory v1.ResourceName = "memory"
-	// ClusterConditionNoDiskPressure true when all cluster nodes have sufficient memory
-	ClusterConditionNoDiskPressure = "NoDiskPressure"
-	// ClusterConditionNoMemoryPressure true when all cluster nodes have sufficient memory
-	ClusterConditionNoMemoryPressure                    = "NoMemoryPressure"
-	ConditionTrue                    v1.ConditionStatus = "True"
-	ConditionFalse                   v1.ConditionStatus = "False"
-)
-
 type StatsAggregator struct {
 	Clusters clusterv1.ClusterInterface
 }
@@ -104,8 +85,8 @@ func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) e
 	newData := &ClusterNodeData{
 		Capacity:                        clusterNode.Status.Capacity,
 		Allocatable:                     clusterNode.Status.Allocatable,
-		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.Conditions, NodeDiskPressure).Status,
-		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.Conditions, NodeMemoryPressure).Status,
+		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeDiskPressure).Status,
+		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeMemoryPressure).Status,
 	}
 	stats[clusterName][clusterNodeName] = newData
 	s.aggregate(cluster, clusterName)
@@ -127,8 +108,8 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 	// allocatable keys
 	apods, amem, acpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
 
-	condDisk := ConditionTrue
-	condMem := ConditionTrue
+	condDisk := v1.ConditionTrue
+	condMem := v1.ConditionTrue
 
 	for name, v := range stats[clusterName] {
 		logrus.Infof("name %v", name)
@@ -140,22 +121,22 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 		amem.Add(*v.Allocatable.Memory())
 		acpu.Add(*v.Allocatable.Cpu())
 
-		if condDisk == ConditionTrue && v.ConditionNoDiskPressureStatus == ConditionTrue {
-			condDisk = ConditionFalse
+		if condDisk == v1.ConditionTrue && v.ConditionNoDiskPressureStatus == v1.ConditionTrue {
+			condDisk = v1.ConditionFalse
 		}
 
-		if condMem == ConditionTrue && v.ConditionNoMemoryPressureStatus == ConditionTrue {
-			condMem = ConditionFalse
+		if condMem == v1.ConditionTrue && v.ConditionNoMemoryPressureStatus == v1.ConditionTrue {
+			condMem = v1.ConditionFalse
 		}
 	}
 
-	cluster.Status.Capacity = v1.ResourceList{ResourcePods: pods, ResourceMemory: mem, ResourceCPU: cpu}
-	cluster.Status.Allocatable = v1.ResourceList{ResourcePods: apods, ResourceMemory: amem, ResourceCPU: acpu}
+	cluster.Status.Capacity = v1.ResourceList{v1.ResourcePods: pods, v1.ResourceMemory: mem, v1.ResourceCPU: cpu}
+	cluster.Status.Allocatable = v1.ResourceList{v1.ResourcePods: apods, v1.ResourceMemory: amem, v1.ResourceCPU: acpu}
 
 	mp(cluster.Status.Capacity, "capacity")
 
-	setConditionStatus(cluster, ClusterConditionNoDiskPressure, condDisk)
-	setConditionStatus(cluster, ClusterConditionNoMemoryPressure, condMem)
+	setConditionStatus(cluster, clusterv1.ClusterConditionNoDiskPressure, condDisk)
+	setConditionStatus(cluster, clusterv1.ClusterConditionNoMemoryPressure, condMem)
 
 }
 

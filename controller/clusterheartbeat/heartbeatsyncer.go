@@ -11,9 +11,7 @@ import (
 )
 
 const (
-	syncInterval                  = 20 * time.Second
-	ClusterConditionReady         = "Ready"
-	ClusterConditionStatusUnknown = "Unknown"
+	syncInterval = 20 * time.Second
 )
 
 var clusterToLastUpdated map[string]time.Time
@@ -66,7 +64,7 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 				logrus.Infof("Error getting Cluster [%s] - %v", clusterName, err)
 				continue
 			}
-			setConditionStatus(cluster, ClusterConditionReady, ClusterConditionStatusUnknown)
+			setConditionStatus(cluster, clusterv1.ClusterConditionReady, corev1.ConditionUnknown)
 			logrus.Infof("Cluster [%s] condition status unknown", clusterName)
 		}
 	}
@@ -84,7 +82,7 @@ func getConditionByType(cluster *clusterv1.Cluster, conditionType clusterv1.Clus
 // Condition is Ready if conditionType is Ready and conditionStatus is True/False but not unknown.
 func getConditionIfReady(cluster *clusterv1.Cluster) *clusterv1.ClusterCondition {
 	for _, condition := range cluster.Status.Conditions {
-		if condition.Type == ClusterConditionReady && condition.Status != ClusterConditionStatusUnknown {
+		if condition.Type == clusterv1.ClusterConditionReady && condition.Status != corev1.ConditionUnknown {
 			return &condition
 		}
 	}
