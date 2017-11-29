@@ -12,23 +12,43 @@ import (
 	workloadv1 "github.com/rancher/types/apis/workload.cattle.io/v1"
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
 type ClusterContext struct {
 	RESTConfig        rest.Config
 	UnversionedClient rest.Interface
-	Cluster           clusterv1.Interface
-	Authorization     authzv1.Interface
+
+	Cluster       clusterv1.Interface
+	Authorization authzv1.Interface
+}
+
+func (c *ClusterContext) controllers() []controller.Starter {
+	return []controller.Starter{
+		c.Cluster,
+		c.Authorization,
+	}
 }
 
 type WorkloadContext struct {
 	Cluster           *ClusterContext
+	ClusterName       string
 	RESTConfig        rest.Config
 	UnversionedClient rest.Interface
-	Apps              appsv1beta2.Interface
-	Workload          workloadv1.Interface
-	Core              corev1.Interface
+	K8sClient         kubernetes.Interface
+
+	Apps     appsv1beta2.Interface
+	Workload workloadv1.Interface
+	Core     corev1.Interface
+}
+
+func (w *WorkloadContext) controllers() []controller.Starter {
+	return []controller.Starter{
+		w.Apps,
+		w.Workload,
+		w.Core,
+	}
 }
 
 func NewClusterContext(config rest.Config) (*ClusterContext, error) {
@@ -63,25 +83,8 @@ func NewClusterContext(config rest.Config) (*ClusterContext, error) {
 }
 
 func (c *ClusterContext) Start(ctx context.Context) error {
-	logrus.Info("Syncing cluster controllers")
-	err := controller.Sync(ctx,
-		c.Cluster,
-		c.Authorization)
-	if err != nil {
-		return err
-	}
-
 	logrus.Info("Starting cluster controllers")
-	if err := c.Cluster.Start(ctx, 5); err != nil {
-		return err
-	}
-
-	if err := c.Authorization.Start(ctx, 5); err != nil {
-		return err
-	}
-
-	logrus.Info("Cluster context started")
-	return nil
+	return controller.SyncThenSync(ctx, 5, c.controllers()...)
 }
 
 func (c *ClusterContext) StartAndWait() error {
@@ -91,13 +94,19 @@ func (c *ClusterContext) StartAndWait() error {
 	return ctx.Err()
 }
 
-func NewWorkloadContext(clusterConfig, config rest.Config) (*WorkloadContext, error) {
+func NewWorkloadContext(clusterConfig, config rest.Config, clusterName string) (*WorkloadContext, error) {
 	var err error
 	context := &WorkloadContext{
-		RESTConfig: config,
+		RESTConfig:  config,
+		ClusterName: clusterName,
 	}
 
 	context.Cluster, err = NewClusterContext(clusterConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	context.K8sClient, err = kubernetes.NewForConfig(&config)
 	if err != nil {
 		return nil, err
 	}
@@ -129,4 +138,18 @@ func NewWorkloadContext(clusterConfig, config rest.Config) (*WorkloadContext, er
 	}
 
 	return context, err
+}
+
+func (w *WorkloadContext) Start(ctx context.Context) error {
+	logrus.Info("Starting workload controllers")
+	controllers := w.Cluster.controllers()
+	controllers = append(controllers, w.controllers()...)
+	return controller.SyncThenSync(ctx, 5, controllers...)
+}
+
+func (w *WorkloadContext) StartAndWait() error {
+	ctx := signal.SigTermCancelContext(context.Background())
+	w.Start(ctx)
+	<-ctx.Done()
+	return ctx.Err()
 }
