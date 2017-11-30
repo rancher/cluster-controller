@@ -2,8 +2,6 @@ package clusterstats
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 	"time"
 
 	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
@@ -26,10 +24,11 @@ type ClusterNodeData struct {
 }
 
 var stats map[string]map[string]*ClusterNodeData
+var nodeNameToClusterName map[string]string
 
 func Register(cluster *config.ClusterContext) {
 	stats = make(map[string]map[string]*ClusterNodeData)
-
+	nodeNameToClusterName = make(map[string]string)
 	s := &StatsAggregator{
 		Clusters: cluster.Cluster.Clusters(""),
 	}
@@ -37,7 +36,7 @@ func Register(cluster *config.ClusterContext) {
 }
 
 func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) error {
-	logrus.Infof("Syncing clusternode name [%s]", key)
+	logrus.Infof("Syncing clusternode [%s]", key)
 	if clusterNode == nil {
 		return s.deleteStats(key)
 	}
@@ -45,10 +44,10 @@ func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) e
 }
 
 func (s *StatsAggregator) deleteStats(key string) error {
-	clusterName, clusterNodeName, err := getNames(key)
-	if err != nil {
-		return err
+	if _, exists := nodeNameToClusterName[key]; !exists {
+		logrus.Infof("ClusterNode [%s] already deleted from stats", key)
 	}
+	clusterName, clusterNodeName := nodeNameToClusterName[key], key
 	cluster, err := s.getCluster(clusterName)
 	if err != nil {
 		return err
@@ -56,7 +55,8 @@ func (s *StatsAggregator) deleteStats(key string) error {
 	oldData := stats[clusterName][clusterNodeName]
 	if _, exists := stats[clusterName][clusterNodeName]; exists {
 		delete(stats[clusterName], clusterNodeName)
-		logrus.Infof("ClusterNode [%s] deleted", key)
+		delete(nodeNameToClusterName, clusterNodeName)
+		logrus.Infof("ClusterNode [%s] stats deleted", key)
 	}
 	s.aggregate(cluster, clusterName)
 	err = s.update(cluster)
@@ -69,10 +69,8 @@ func (s *StatsAggregator) deleteStats(key string) error {
 }
 
 func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) error {
-	clusterName, clusterNodeName, err := getNames(clusterNode.Name)
-	if err != nil {
-		return err
-	}
+	clusterName, clusterNodeName := clusterNode.ClusterName, clusterNode.Name
+	nodeNameToClusterName[clusterNodeName] = clusterName
 	cluster, err := s.getCluster(clusterName)
 	if err != nil {
 		return err
@@ -148,16 +146,6 @@ func mp(i interface{}, msg string) {
 	logrus.Infof(msg+"  %s", string(ans))
 }
 
-func getNames(name string) (string, string, error) {
-	splitName := strings.Split(strings.TrimSpace(name), "-")
-	if len(splitName) != 2 {
-		return "", "", fmt.Errorf("clusterNode name should be in the format 'node-cluster' %s", name)
-	}
-	clusterName := splitName[0]
-	clusterNodeName := splitName[1]
-	return clusterName, clusterNodeName, nil
-}
-
 func getNodeConditionByType(conditions []v1.NodeCondition, conditionType v1.NodeConditionType) *v1.NodeCondition {
 	for _, condition := range conditions {
 		if condition.Type == conditionType {
@@ -176,6 +164,12 @@ func setConditionStatus(cluster *clusterv1.Cluster, conditionType clusterv1.Clus
 		}
 		condition.Status = status
 		condition.LastUpdateTime = now
+	} else {
+		cluster.Status.Conditions = append(cluster.Status.Conditions,
+			clusterv1.ClusterCondition{Type: conditionType,
+				Status:             status,
+				LastUpdateTime:     now,
+				LastTransitionTime: now})
 	}
 }
 
