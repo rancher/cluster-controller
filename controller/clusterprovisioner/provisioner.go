@@ -102,19 +102,9 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 			}
 		}
 
-		// 2. Remove cluster nodes
-		nodes, err := p.getClusterNodes(cluster)
-		if err != nil {
-			return fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
-		}
-		for _, node := range nodes {
-			if err = p.ClusterNodes.Delete(node.Name, &metav1.DeleteOptions{}); err != nil {
-				return fmt.Errorf("Failed to remove cluster node [%s] for cluster [%s]: %v", node.Name, cluster.Name, err)
-			}
-		}
-		// 3. Remove k8s object
+		// 2. Remove k8s object
 		cluster.ObjectMeta.Finalizers = []string{}
-		_, err = p.Clusters.Update(cluster)
+		_, err := p.Clusters.Update(cluster)
 		if err != nil {
 			return fmt.Errorf("Failed to reset finalizers for cluster [%s]: %v", cluster.Name, err)
 		}
@@ -122,20 +112,6 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 	}
 
 	return nil
-}
-
-func (p *Provisioner) getClusterNodes(cluster *clusterv1.Cluster) ([]clusterv1.ClusterNode, error) {
-	var nodes []clusterv1.ClusterNode
-	all, err := p.ClusterNodes.List(metav1.ListOptions{})
-	if err != nil {
-		return nodes, fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
-	}
-	for _, node := range all.Items {
-		if node.ClusterName == cluster.Name {
-			nodes = append(nodes, node)
-		}
-	}
-	return nodes, nil
 }
 
 func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
