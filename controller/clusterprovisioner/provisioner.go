@@ -3,7 +3,6 @@ package clusterprovisioner
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"time"
 
 	driver "github.com/rancher/kontainer-engine/stub"
@@ -132,7 +131,7 @@ func (p *Provisioner) getClusterNodes(cluster *clusterv1.Cluster) ([]clusterv1.C
 		return nodes, fmt.Errorf("Failed to fetch cluster nodes for cluster [%s]: %v", cluster.Name, err)
 	}
 	for _, node := range all.Items {
-		if strings.HasPrefix(node.Name, fmt.Sprintf("%s-", cluster.Name)) {
+		if node.ClusterName == cluster.Name {
 			nodes = append(nodes, node)
 		}
 	}
