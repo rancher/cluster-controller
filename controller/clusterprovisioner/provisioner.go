@@ -85,8 +85,8 @@ func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 }
 
 func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
-	set, first := p.finalizerSet(cluster)
-	if set && first {
+	set, index := p.finalizerSet(cluster)
+	if set && index == 0 {
 		logrus.Infof("Deleting cluster [%s]", cluster.Name)
 		// 1. Call the driver to remove the cluster
 		if needToProvision(cluster) && isClusterProvisioned(cluster) {
@@ -102,9 +102,17 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 			}
 		}
 
-		// 2. Remove k8s object
-		cluster.ObjectMeta.Finalizers = []string{}
-		_, err := p.Clusters.Update(cluster)
+		// 2. Remove the finalizer
+		toUpdate := cluster.DeepCopy()
+		var finalizers []string
+		for _, finalizer := range cluster.Finalizers {
+			if finalizer == p.GetName() {
+				continue
+			}
+			finalizers = append(finalizers, finalizer)
+		}
+		toUpdate.Finalizers = finalizers
+		_, err := p.Clusters.Update(toUpdate)
 		if err != nil {
 			return fmt.Errorf("Failed to reset finalizers for cluster [%s]: %v", cluster.Name, err)
 		}
@@ -236,15 +244,15 @@ func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
 	return err
 }
 
-func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, bool) {
+func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, int) {
 	i := 0
 	for _, value := range cluster.ObjectMeta.Finalizers {
 		if value == p.GetName() {
-			return true, i == 0
+			return true, i
 		}
 		i++
 	}
-	return false, false
+	return false, -1
 }
 
 func setClusterCondition(status *clusterv1.ClusterStatus, c clusterv1.ClusterCondition) {
