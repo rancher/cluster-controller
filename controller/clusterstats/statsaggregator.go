@@ -19,6 +19,8 @@ type StatsAggregator struct {
 type ClusterNodeData struct {
 	Capacity                        v1.ResourceList
 	Allocatable                     v1.ResourceList
+	Requested                       v1.ResourceList
+	Limits                          v1.ResourceList
 	ConditionNoDiskPressureStatus   v1.ConditionStatus
 	ConditionNoMemoryPressureStatus v1.ConditionStatus
 }
@@ -81,14 +83,15 @@ func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) e
 
 	oldData := stats[clusterName][clusterNodeName]
 	newData := &ClusterNodeData{
-		Capacity:                        clusterNode.Status.Capacity,
-		Allocatable:                     clusterNode.Status.Allocatable,
+		Capacity:    clusterNode.Status.Capacity,
+		Allocatable: clusterNode.Status.Allocatable,
+		Requested:   clusterNode.Status.Requested,
+		Limits:      clusterNode.Status.Limits,
 		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeDiskPressure).Status,
 		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeMemoryPressure).Status,
 	}
 	stats[clusterName][clusterNodeName] = newData
 	s.aggregate(cluster, clusterName)
-
 	err = s.update(cluster)
 	if err != nil {
 		stats[clusterName][clusterNodeName] = oldData
@@ -103,6 +106,10 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 	pods, mem, cpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
 	// allocatable keys
 	apods, amem, acpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
+	// requested keys
+	rpods, rmem, rcpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
+	// limited keys
+	lpods, lmem, lcpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
 
 	condDisk := v1.ConditionTrue
 	condMem := v1.ConditionTrue
@@ -116,6 +123,14 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 		amem.Add(*v.Allocatable.Memory())
 		acpu.Add(*v.Allocatable.Cpu())
 
+		rpods.Add(*v.Requested.Pods())
+		rmem.Add(*v.Requested.Memory())
+		rcpu.Add(*v.Requested.Cpu())
+
+		lpods.Add(*v.Limits.Pods())
+		lmem.Add(*v.Limits.Memory())
+		lcpu.Add(*v.Limits.Cpu())
+
 		if condDisk == v1.ConditionTrue && v.ConditionNoDiskPressureStatus == v1.ConditionTrue {
 			condDisk = v1.ConditionFalse
 		}
@@ -127,6 +142,8 @@ func (s *StatsAggregator) aggregate(cluster *clusterv1.Cluster, clusterName stri
 
 	cluster.Status.Capacity = v1.ResourceList{v1.ResourcePods: pods, v1.ResourceMemory: mem, v1.ResourceCPU: cpu}
 	cluster.Status.Allocatable = v1.ResourceList{v1.ResourcePods: apods, v1.ResourceMemory: amem, v1.ResourceCPU: acpu}
+	cluster.Status.Requested = v1.ResourceList{v1.ResourcePods: rpods, v1.ResourceMemory: rmem, v1.ResourceCPU: rcpu}
+	cluster.Status.Limits = v1.ResourceList{v1.ResourcePods: lpods, v1.ResourceMemory: lmem, v1.ResourceCPU: lcpu}
 
 	setConditionStatus(cluster, clusterv1.ClusterConditionNoDiskPressure, condDisk)
 	setConditionStatus(cluster, clusterv1.ClusterConditionNoMemoryPressure, condMem)
