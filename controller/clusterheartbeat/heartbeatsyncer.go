@@ -43,16 +43,18 @@ func (h *HeartBeatSyncer) sync(key string, cluster *clusterv1.Cluster) error {
 		if condition != nil {
 			lastUpdateTime, _ := time.Parse(time.RFC3339, condition.LastUpdateTime)
 			clusterToLastUpdated[key] = lastUpdateTime
+			logrus.Infof("Synced cluster [%s] successfully", key)
 		}
 	}
-	logrus.Infof("Synced cluster [%s] successfully", key)
+	logrus.Infof("Syncing cluster [%s] complete ", key)
 	return nil
 }
 
 func (h *HeartBeatSyncer) syncHeartBeat(syncInterval time.Duration) {
 	for _ = range time.Tick(syncInterval) {
-		logrus.Infof("Sync heartbeat")
+		logrus.Infof("Start heartbeat")
 		h.checkHeartBeat()
+		logrus.Infof("Heartbeat complete")
 	}
 }
 
@@ -66,17 +68,27 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 			}
 			setConditionStatus(cluster, clusterv1.ClusterConditionReady, corev1.ConditionUnknown)
 			logrus.Infof("Cluster [%s] condition status unknown", clusterName)
+			err = h.update(cluster)
+			if err != nil {
+				logrus.Infof("Error getting Cluster [%s] - %v", clusterName, err)
+				continue
+			}
 		}
 	}
 }
 
-func getConditionByType(cluster *clusterv1.Cluster, conditionType clusterv1.ClusterConditionType) *clusterv1.ClusterCondition {
-	for _, condition := range cluster.Status.Conditions {
+func (h *HeartBeatSyncer) update(cluster *clusterv1.Cluster) error {
+	_, err := h.ClusterClient.Update(cluster)
+	return err
+}
+
+func getConditionByType(cluster *clusterv1.Cluster, conditionType clusterv1.ClusterConditionType) (int, *clusterv1.ClusterCondition) {
+	for index, condition := range cluster.Status.Conditions {
 		if condition.Type == conditionType {
-			return &condition
+			return index, &condition
 		}
 	}
-	return nil
+	return -1, nil
 }
 
 // Condition is Ready if conditionType is Ready and conditionStatus is True/False but not unknown.
@@ -90,8 +102,15 @@ func getConditionIfReady(cluster *clusterv1.Cluster) *clusterv1.ClusterCondition
 }
 
 func setConditionStatus(cluster *clusterv1.Cluster, conditionType clusterv1.ClusterConditionType, status corev1.ConditionStatus) {
-	condition := getConditionByType(cluster, conditionType)
+	pos, condition := getConditionByType(cluster, conditionType)
+	currTime := time.Now().Format(time.RFC3339)
 	if condition != nil {
-		condition.Status = status
+		if condition.Status != status {
+			condition.Status = status
+			condition.LastTransitionTime = currTime
+			logrus.Infof("condition %v", condition != nil)
+		}
+		condition.LastUpdateTime = currTime
+		cluster.Status.Conditions[pos] = *condition
 	}
 }
