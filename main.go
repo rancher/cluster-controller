@@ -37,12 +37,12 @@ func run(kubeConfigFile string) error {
 		return err
 	}
 
-	cluster, err := config.NewClusterContext(*kubeConfig)
+	management, err := config.NewManagementContext(*kubeConfig)
 	if err != nil {
 		return err
 	}
 
-	controller.Register(cluster)
+	controller.Register(management)
 
-	return cluster.StartAndWait()
+	return management.StartAndWait()
 }

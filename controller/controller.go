@@ -7,8 +7,8 @@ import (
 	"github.com/rancher/types/config"
 )
 
-func Register(cluster *config.ClusterContext) {
-	clusterheartbeat.Register(cluster)
-	clusterprovisioner.Register(cluster)
-	clusterstats.Register(cluster)
+func Register(management *config.ManagementContext) {
+	clusterheartbeat.Register(management)
+	clusterprovisioner.Register(management)
+	clusterstats.Register(management)
 }

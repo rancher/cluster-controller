@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
+	clusterv1 "github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
@@ -28,16 +28,16 @@ type ClusterNodeData struct {
 var stats map[string]map[string]*ClusterNodeData
 var nodeNameToClusterName map[string]string
 
-func Register(cluster *config.ClusterContext) {
+func Register(cluster *config.ManagementContext) {
 	stats = make(map[string]map[string]*ClusterNodeData)
 	nodeNameToClusterName = make(map[string]string)
 	s := &StatsAggregator{
-		Clusters: cluster.Cluster.Clusters(""),
+		Clusters: cluster.Management.Clusters(""),
 	}
-	cluster.Cluster.ClusterNodes("").Controller().AddHandler(s.sync)
+	cluster.Management.Machines("").Controller().AddHandler(s.sync)
 }
 
-func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.ClusterNode) error {
+func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.Machine) error {
 	logrus.Infof("Syncing clusternode [%s]", key)
 	if clusterNode == nil {
 		return s.deleteStats(key)
@@ -70,7 +70,7 @@ func (s *StatsAggregator) deleteStats(key string) error {
 	return nil
 }
 
-func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) error {
+func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.Machine) error {
 	clusterName, clusterNodeName := clusterNode.ClusterName, clusterNode.Name
 	nodeNameToClusterName[clusterNodeName] = clusterName
 	cluster, err := s.getCluster(clusterName)
@@ -83,12 +83,12 @@ func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.ClusterNode) e
 
 	oldData := stats[clusterName][clusterNodeName]
 	newData := &ClusterNodeData{
-		Capacity:    clusterNode.Status.Capacity,
-		Allocatable: clusterNode.Status.Allocatable,
+		Capacity:    clusterNode.Status.NodeStatus.Capacity,
+		Allocatable: clusterNode.Status.NodeStatus.Allocatable,
 		Requested:   clusterNode.Status.Requested,
 		Limits:      clusterNode.Status.Limits,
-		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeDiskPressure).Status,
-		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.Conditions, v1.NodeMemoryPressure).Status,
+		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.NodeStatus.Conditions, v1.NodeDiskPressure).Status,
+		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.NodeStatus.Conditions, v1.NodeMemoryPressure).Status,
 	}
 	stats[clusterName][clusterNodeName] = newData
 	s.aggregate(cluster, clusterName)
