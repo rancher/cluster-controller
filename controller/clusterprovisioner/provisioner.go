@@ -6,7 +6,7 @@ import (
 	"time"
 
 	driver "github.com/rancher/kontainer-engine/stub"
-	clusterv1 "github.com/rancher/types/apis/cluster.cattle.io/v1"
+	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
@@ -21,19 +21,17 @@ const (
 )
 
 type Provisioner struct {
-	ClusterNodes clusterv1.ClusterNodeInterface
-	Clusters     clusterv1.ClusterInterface
+	Clusters v3.ClusterInterface
 }
 
-func Register(cluster *config.ClusterContext) {
+func Register(management *config.ManagementContext) {
 	p := &Provisioner{
-		ClusterNodes: cluster.Cluster.ClusterNodes(""),
-		Clusters:     cluster.Cluster.Clusters(""),
+		Clusters: management.Management.Clusters(""),
 	}
-	cluster.Cluster.Clusters("").Controller().AddHandler(p.sync)
+	management.Management.Clusters("").Controller().AddHandler(p.sync)
 }
 
-func configChanged(cluster *clusterv1.Cluster) bool {
+func configChanged(cluster *v3.Cluster) bool {
 	changed := false
 	if cluster.Spec.AzureKubernetesServiceConfig != nil {
 		applied := cluster.Status.AppliedSpec.AzureKubernetesServiceConfig
@@ -52,7 +50,7 @@ func configChanged(cluster *clusterv1.Cluster) bool {
 	return changed
 }
 
-func getAction(cluster *clusterv1.Cluster) string {
+func getAction(cluster *v3.Cluster) string {
 	if cluster == nil {
 		return NoopAction
 	}
@@ -70,7 +68,7 @@ func getAction(cluster *clusterv1.Cluster) string {
 	return NoopAction
 }
 
-func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
+func (p *Provisioner) sync(key string, cluster *v3.Cluster) error {
 	action := getAction(cluster)
 	switch action {
 	case CreateAction:
@@ -84,7 +82,7 @@ func (p *Provisioner) sync(key string, cluster *clusterv1.Cluster) error {
 	}
 }
 
-func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
+func (p *Provisioner) removeCluster(cluster *v3.Cluster) error {
 	set, index := p.finalizerSet(cluster)
 	if set && index == 0 {
 		logrus.Infof("Deleting cluster [%s]", cluster.Name)
@@ -114,6 +112,7 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 		toUpdate.Finalizers = finalizers
 		_, err := p.Clusters.Update(toUpdate)
 		if err != nil {
+			p.Clusters.Delete(toUpdate.Name, nil)
 			return fmt.Errorf("Failed to reset finalizers for cluster [%s]: %v", cluster.Name, err)
 		}
 		logrus.Infof("Deleted cluster [%s]", cluster.Name)
@@ -122,7 +121,7 @@ func (p *Provisioner) removeCluster(cluster *clusterv1.Cluster) error {
 	return nil
 }
 
-func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
+func (p *Provisioner) updateCluster(cluster *v3.Cluster) error {
 	err := p.preUpdateClusterStatus(cluster.Name)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
@@ -145,7 +144,7 @@ func (p *Provisioner) updateCluster(cluster *clusterv1.Cluster) error {
 	return nil
 }
 
-func (p *Provisioner) createCluster(cluster *clusterv1.Cluster) error {
+func (p *Provisioner) createCluster(cluster *v3.Cluster) error {
 	err := p.preUpdateClusterStatus(cluster.Name)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
@@ -173,18 +172,18 @@ func (p *Provisioner) GetName() string {
 	return "clusterProvisioner"
 }
 
-func (p *Provisioner) postUpdateClusterStatusError(cluster *clusterv1.Cluster, userError error) error {
+func (p *Provisioner) postUpdateClusterStatusError(cluster *v3.Cluster, userError error) error {
 	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "True", fmt.Sprintf("Failed to update cluster %s", userError.Error()))
+	condition := newClusterCondition(v3.ClusterConditionUpdating, "True", fmt.Sprintf("Failed to update cluster %s", userError.Error()))
 	setClusterCondition(&toUpdate.Status, condition)
 	_, err = p.Clusters.Update(toUpdate)
 	return err
 }
 
-func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster, apiEndpiont string, serviceAccountToken string, caCert string) error {
+func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *v3.Cluster, apiEndpiont string, serviceAccountToken string, caCert string) error {
 	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -194,19 +193,19 @@ func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *clusterv1.Cluster,
 	toUpdate.Status.ServiceAccountToken = serviceAccountToken
 	toUpdate.Status.CACert = caCert
 	if !isClusterProvisioned(cluster) {
-		condition := newClusterCondition(clusterv1.ClusterConditionProvisioned, "True", "Cluster providioned successfully")
+		condition := newClusterCondition(v3.ClusterConditionProvisioned, "True", "Cluster providioned successfully")
 		setClusterCondition(&toUpdate.Status, condition)
 	}
 
-	condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "False", "Cluster updated successfully")
+	condition := newClusterCondition(v3.ClusterConditionUpdating, "False", "Cluster updated successfully")
 	setClusterCondition(&toUpdate.Status, condition)
 	_, err = p.Clusters.Update(toUpdate)
 	return err
 }
 
-func newClusterCondition(condType clusterv1.ClusterConditionType, status v1.ConditionStatus, reason string) clusterv1.ClusterCondition {
+func newClusterCondition(condType v3.ClusterConditionType, status v1.ConditionStatus, reason string) v3.ClusterCondition {
 	now := time.Now().Format(time.RFC3339)
-	return clusterv1.ClusterCondition{
+	return v3.ClusterCondition{
 		Type:               condType,
 		Status:             status,
 		LastUpdateTime:     now,
@@ -222,16 +221,16 @@ func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
 	}
 	if toUpdate.Status.Conditions == nil {
 		// init conditions
-		conditions := []clusterv1.ClusterCondition{}
-		conditions = append(conditions, newClusterCondition(clusterv1.ClusterConditionNoMemoryPressure, "Unknown", ""))
-		conditions = append(conditions, newClusterCondition(clusterv1.ClusterConditionNoDiskPressure, "Unknown", ""))
-		conditions = append(conditions, newClusterCondition(clusterv1.ClusterConditionReady, "Unknown", ""))
-		conditions = append(conditions, newClusterCondition(clusterv1.ClusterConditionUpdating, "True", ""))
-		conditions = append(conditions, newClusterCondition(clusterv1.ClusterConditionProvisioned, "False", ""))
+		conditions := []v3.ClusterCondition{}
+		conditions = append(conditions, newClusterCondition(v3.ClusterConditionNoMemoryPressure, "Unknown", ""))
+		conditions = append(conditions, newClusterCondition(v3.ClusterConditionNoDiskPressure, "Unknown", ""))
+		conditions = append(conditions, newClusterCondition(v3.ClusterConditionReady, "Unknown", ""))
+		conditions = append(conditions, newClusterCondition(v3.ClusterConditionUpdating, "True", ""))
+		conditions = append(conditions, newClusterCondition(v3.ClusterConditionProvisioned, "False", ""))
 		toUpdate.Status.Conditions = conditions
-		toUpdate.Status.ComponentStatuses = []clusterv1.ClusterComponentStatus{}
+		toUpdate.Status.ComponentStatuses = []v3.ClusterComponentStatus{}
 	} else {
-		condition := newClusterCondition(clusterv1.ClusterConditionUpdating, "True", "")
+		condition := newClusterCondition(v3.ClusterConditionUpdating, "True", "")
 		setClusterCondition(&toUpdate.Status, condition)
 	}
 
@@ -244,7 +243,7 @@ func (p *Provisioner) preUpdateClusterStatus(clusterName string) error {
 	return err
 }
 
-func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, int) {
+func (p *Provisioner) finalizerSet(cluster *v3.Cluster) (bool, int) {
 	i := 0
 	for _, value := range cluster.ObjectMeta.Finalizers {
 		if value == p.GetName() {
@@ -255,7 +254,7 @@ func (p *Provisioner) finalizerSet(cluster *clusterv1.Cluster) (bool, int) {
 	return false, -1
 }
 
-func setClusterCondition(status *clusterv1.ClusterStatus, c clusterv1.ClusterCondition) {
+func setClusterCondition(status *v3.ClusterStatus, c v3.ClusterCondition) {
 	pos, cp := getClusterCondition(status, c.Type)
 	if cp != nil && cp.Status == c.Status {
 		return
@@ -268,7 +267,7 @@ func setClusterCondition(status *clusterv1.ClusterStatus, c clusterv1.ClusterCon
 	}
 }
 
-func getClusterCondition(status *clusterv1.ClusterStatus, t clusterv1.ClusterConditionType) (int, *clusterv1.ClusterCondition) {
+func getClusterCondition(status *v3.ClusterStatus, t v3.ClusterConditionType) (int, *v3.ClusterCondition) {
 	for i, c := range status.Conditions {
 		if t == c.Type {
 			return i, &c
@@ -277,14 +276,14 @@ func getClusterCondition(status *clusterv1.ClusterStatus, t clusterv1.ClusterCon
 	return -1, nil
 }
 
-func isClusterProvisioned(cluster *clusterv1.Cluster) bool {
-	_, isProvisioned := getClusterCondition(&cluster.Status, clusterv1.ClusterConditionProvisioned)
+func isClusterProvisioned(cluster *v3.Cluster) bool {
+	_, isProvisioned := getClusterCondition(&cluster.Status, v3.ClusterConditionProvisioned)
 	if isProvisioned == nil {
 		return false
 	}
 	return isProvisioned.Status == "True"
 }
 
-func needToProvision(cluster *clusterv1.Cluster) bool {
+func needToProvision(cluster *v3.Cluster) bool {
 	return cluster.Spec.RancherKubernetesEngineConfig != nil || cluster.Spec.AzureKubernetesServiceConfig != nil || cluster.Spec.GoogleKubernetesEngineConfig != nil
 }
