@@ -48,6 +48,7 @@ func (s *StatsAggregator) sync(key string, clusterNode *clusterv1.Machine) error
 func (s *StatsAggregator) deleteStats(key string) error {
 	if _, exists := nodeNameToClusterName[key]; !exists {
 		logrus.Infof("ClusterNode [%s] already deleted from stats", key)
+		return nil
 	}
 	clusterName, clusterNodeName := nodeNameToClusterName[key], key
 	cluster, err := s.getCluster(clusterName)
@@ -72,7 +73,6 @@ func (s *StatsAggregator) deleteStats(key string) error {
 
 func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.Machine) error {
 	clusterName, clusterNodeName := clusterNode.Spec.ClusterName, clusterNode.Status.NodeName
-	nodeNameToClusterName[clusterNodeName] = clusterName
 	cluster, err := s.getCluster(clusterName)
 	if err != nil {
 		return err
@@ -91,6 +91,7 @@ func (s *StatsAggregator) addOrUpdateStats(clusterNode *clusterv1.Machine) error
 		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.NodeStatus.Conditions, v1.NodeMemoryPressure).Status,
 	}
 	stats[clusterName][clusterNodeName] = newData
+	nodeNameToClusterName[clusterNodeName] = clusterName
 	s.aggregate(cluster, clusterName)
 	err = s.update(cluster)
 	if err != nil {
