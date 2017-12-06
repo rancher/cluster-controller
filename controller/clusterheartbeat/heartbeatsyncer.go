@@ -108,7 +108,6 @@ func setConditionStatus(cluster *v3.Cluster, conditionType v3.ClusterConditionTy
 		if condition.Status != status {
 			condition.Status = status
 			condition.LastTransitionTime = currTime
-			logrus.Infof("condition %v", condition != nil)
 		}
 		condition.LastUpdateTime = currTime
 		cluster.Status.Conditions[pos] = *condition

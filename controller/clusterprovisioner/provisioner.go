@@ -193,7 +193,7 @@ func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *v3.Cluster, apiEnd
 	toUpdate.Status.ServiceAccountToken = serviceAccountToken
 	toUpdate.Status.CACert = caCert
 	if !isClusterProvisioned(cluster) {
-		condition := newClusterCondition(v3.ClusterConditionProvisioned, "True", "Cluster providioned successfully")
+		condition := newClusterCondition(v3.ClusterConditionProvisioned, "True", "Cluster provisioned successfully")
 		setClusterCondition(&toUpdate.Status, condition)
 	}
 
