@@ -51,6 +51,9 @@ func (d *dialer) Dial(network, addr string) (net.Conn, error) {
 }
 
 func (h *Host) TunnelUp() error {
+	if h.DClient != nil {
+		return nil
+	}
 	logrus.Infof("[ssh] Setup tunnel for host [%s]", h.Address)
 	key, err := checkEncryptedKey(h.SSHKey, h.SSHKeyPath)
 	if err != nil {
@@ -140,7 +143,7 @@ func checkEncryptedKey(sshKey, sshKeyPath string) (ssh.Signer, error) {
 			return nil, err
 		}
 	}
-	return key, nil
+	return key, err
 }
 
 func privateKeyPath(sshKeyPath string) string {

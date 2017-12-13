@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/rancher/cluster-controller/controller"
@@ -42,7 +43,7 @@ func run(kubeConfigFile string) error {
 		return err
 	}
 
-	controller.Register(management)
+	controller.Register(context.Background(), management)
 
 	return management.StartAndWait()
 }
