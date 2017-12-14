@@ -6,6 +6,7 @@ import (
 	"time"
 
 	driver "github.com/rancher/kontainer-engine/stub"
+	machineController "github.com/rancher/machine-controller/controller/machine"
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
@@ -22,11 +23,13 @@ const (
 
 type Provisioner struct {
 	Clusters v3.ClusterInterface
+	Machines v3.MachineInterface
 }
 
 func Register(management *config.ManagementContext) {
 	p := &Provisioner{
 		Clusters: management.Management.Clusters(""),
+		Machines: management.Management.Machines(""),
 	}
 	management.Management.Clusters("").Controller().AddHandler(p.sync)
 }
@@ -129,7 +132,18 @@ func (p *Provisioner) updateCluster(cluster *v3.Cluster) error {
 	logrus.Infof("Updating cluster [%s]", cluster.Name)
 	var apiEndpoint, serviceAccountToken, caCert string
 	if needToProvision(cluster) {
-		apiEndpoint, serviceAccountToken, caCert, err = driver.Update(cluster.Name, cluster.Spec)
+		// 1. Wait for machine config to be provisioned
+		// Gets called on update as the machine can be removed after the cluster is already provisioned
+		ready, spec, err := p.reconcileSpec(cluster.Spec, cluster.Name)
+		if err != nil {
+			_ = p.postUpdateClusterStatusError(cluster, err)
+			return fmt.Errorf("Failed to validate machine hosts for the cluster [%s]: %v", cluster.Name, err)
+		}
+		if !ready {
+			return fmt.Errorf("Machine hosts are not ready for the cluster [%s], resubmitting the event", cluster.Name)
+		}
+		// 2. Call the update
+		apiEndpoint, serviceAccountToken, caCert, err = driver.Update(cluster.Name, spec)
 		if err != nil {
 			_ = p.postUpdateClusterStatusError(cluster, err)
 			return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
@@ -153,7 +167,17 @@ func (p *Provisioner) createCluster(cluster *v3.Cluster) error {
 
 	var apiEndpoint, serviceAccountToken, caCert string
 	if needToProvision(cluster) {
-		apiEndpoint, serviceAccountToken, caCert, err = driver.Create(cluster.Name, cluster.Spec)
+		// 1. Wait for machine config to be provisioned
+		ready, spec, err := p.reconcileSpec(cluster.Spec, cluster.Name)
+		if err != nil {
+			_ = p.postUpdateClusterStatusError(cluster, err)
+			return fmt.Errorf("Failed to validate machine hosts for the cluster [%s]: %v", cluster.Name, err)
+		}
+		if !ready {
+			return fmt.Errorf("Machine hosts are not ready for the cluster [%s], resubmitting the create event", cluster.Name)
+		}
+		// 2. Provision the cluster
+		apiEndpoint, serviceAccountToken, caCert, err = driver.Create(cluster.Name, spec)
 		if err != nil {
 			_ = p.postUpdateClusterStatusError(cluster, err)
 			return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
@@ -166,6 +190,98 @@ func (p *Provisioner) createCluster(cluster *v3.Cluster) error {
 	}
 	logrus.Infof("Provisioned cluster [%s]", cluster.Name)
 	return nil
+}
+
+func (p *Provisioner) reconcileSpec(spec v3.ClusterSpec, clusterName string) (bool, v3.ClusterSpec, error) {
+	if spec.RancherKubernetesEngineConfig == nil {
+		return true, spec, nil
+	}
+
+	useMachines := false
+	for _, node := range spec.RancherKubernetesEngineConfig.Nodes {
+		if node.MachineName != "" {
+			useMachines = true
+			break
+		}
+	}
+	if !useMachines {
+		return true, spec, nil
+	}
+
+	nodesReady, updatedNodes, err := p.getUpdatedNodes(*spec.RancherKubernetesEngineConfig, clusterName)
+	if err != nil || !nodesReady {
+		return false, spec, err
+	}
+	spec.RancherKubernetesEngineConfig.Nodes = updatedNodes
+
+	return true, spec, nil
+}
+
+func (p *Provisioner) getUpdatedNodes(config v3.RancherKubernetesEngineConfig, clusterName string) (bool, []v3.RKEConfigNode, error) {
+	i := 0
+	for {
+		// TODO switch to passing a field selector once the upstream kubernetes bug https://github.com/kubernetes/kubernetes/pull/53345 is fixed
+		//machines, err := p.Machines.List(metav1.ListOptions{FieldSelector: fmt.Sprintf("spec.clusterName=%s", clusterName)})
+		allMachines, err := p.Machines.List(metav1.ListOptions{})
+		if err != nil {
+			return false, config.Nodes, err
+		}
+		var machines []v3.Machine
+		for _, machine := range allMachines.Items {
+			if machine.Spec.ClusterName == clusterName {
+				machines = append(machines, machine)
+			}
+		}
+
+		if len(machines) == 0 {
+			logrus.Warnf("No machiens exist in cluster [%s]", clusterName)
+			return false, config.Nodes, nil
+		}
+		machineMap := make(map[string]v3.Machine)
+		for _, machine := range machines {
+			machineMap[machine.Name] = machine
+		}
+
+		var modifiedNodes []v3.RKEConfigNode
+		ready := true
+		for _, node := range config.Nodes {
+			if node.MachineName != "" {
+				if _, ok := machineMap[node.MachineName]; !ok {
+					logrus.Errorf("Machine [%s] does not exist for cluster [%s]", node.MachineName, clusterName)
+					ready = false
+					break
+				}
+				machine := machineMap[node.MachineName]
+				machineProvisioned := false
+				for _, condition := range machine.Status.Conditions {
+					if condition.Type == machineController.ProvisionedState {
+						if condition.Status == v1.ConditionTrue {
+							machineProvisioned = true
+							break
+						}
+					}
+				}
+				if !machineProvisioned {
+					logrus.Warnf("Machine [%s] in cluster [%s] is not provisioned yet", node.MachineName, clusterName)
+					ready = false
+					break
+				}
+				node.Address = machine.Status.Address
+				node.SSHKey = machine.Status.SSHPrivateKey
+				node.User = machine.Status.SSHUser
+			}
+			modifiedNodes = append(modifiedNodes, node)
+		}
+		if ready {
+			return true, modifiedNodes, nil
+		}
+		if i == 3 {
+			break
+		}
+		time.Sleep(5 * time.Second)
+		i++
+	}
+	return false, config.Nodes, nil
 }
 
 func (p *Provisioner) GetName() string {
