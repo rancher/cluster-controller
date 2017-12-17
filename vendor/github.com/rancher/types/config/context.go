@@ -4,30 +4,46 @@ import (
 	"context"
 
 	"github.com/rancher/norman/controller"
+	"github.com/rancher/norman/event"
 	"github.com/rancher/norman/signal"
+	"github.com/rancher/norman/types"
 	appsv1beta2 "github.com/rancher/types/apis/apps/v1beta2"
 	corev1 "github.com/rancher/types/apis/core/v1"
 	extv1beta1 "github.com/rancher/types/apis/extensions/v1beta1"
 	managementv3 "github.com/rancher/types/apis/management.cattle.io/v3"
+	managementSchema "github.com/rancher/types/apis/management.cattle.io/v3/schema"
 	projectv3 "github.com/rancher/types/apis/project.cattle.io/v3"
 	rbacv1 "github.com/rancher/types/apis/rbac.authorization.k8s.io/v1"
 	"github.com/sirupsen/logrus"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 )
 
 type ManagementContext struct {
+	eventBroadcaster record.EventBroadcaster
+
 	LocalConfig       *rest.Config
 	RESTConfig        rest.Config
 	UnversionedClient rest.Interface
+	K8sClient         kubernetes.Interface
+	Events            record.EventRecorder
+	EventLogger       event.Logger
+	Schemas           *types.Schemas
+	Scheme            *runtime.Scheme
 
 	Management managementv3.Interface
+	RBAC       rbacv1.Interface
 }
 
 func (c *ManagementContext) controllers() []controller.Starter {
 	return []controller.Starter{
 		c.Management,
+		c.RBAC,
 	}
 }
 
@@ -67,6 +83,16 @@ func NewManagementContext(config rest.Config) (*ManagementContext, error) {
 		return nil, err
 	}
 
+	context.K8sClient, err = kubernetes.NewForConfig(&config)
+	if err != nil {
+		return nil, err
+	}
+
+	context.RBAC, err = rbacv1.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	dynamicConfig := config
 	if dynamicConfig.NegotiatedSerializer == nil {
 		configConfig := dynamic.ContentConfig()
@@ -78,11 +104,33 @@ func NewManagementContext(config rest.Config) (*ManagementContext, error) {
 		return nil, err
 	}
 
+	context.Schemas = types.NewSchemas().
+		AddSchemas(managementSchema.Schemas)
+
+	context.Scheme = runtime.NewScheme()
+	managementv3.AddToScheme(context.Scheme)
+
+	context.eventBroadcaster = record.NewBroadcaster()
+	context.Events = context.eventBroadcaster.NewRecorder(context.Scheme, v1.EventSource{
+		Component: "CattleManagementServer",
+	})
+	context.EventLogger = event.NewLogger(context.Events)
+
 	return context, err
 }
 
 func (c *ManagementContext) Start(ctx context.Context) error {
 	logrus.Info("Starting management controllers")
+
+	watcher := c.eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{
+		Interface: c.K8sClient.CoreV1().Events(""),
+	})
+
+	go func() {
+		<-ctx.Done()
+		watcher.Stop()
+	}()
+
 	return controller.SyncThenSync(ctx, 5, c.controllers()...)
 }
 
