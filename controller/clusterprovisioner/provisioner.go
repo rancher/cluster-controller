@@ -5,12 +5,14 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/rancher/cluster-controller/controller/utils"
 	driver "github.com/rancher/kontainer-engine/stub"
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -21,7 +23,8 @@ const (
 )
 
 type Provisioner struct {
-	Clusters v3.ClusterInterface
+	Clusters     v3.ClusterInterface
+	K8sClientSet *kubernetes.Clientset
 }
 
 func Register(management *config.ManagementContext) {
@@ -29,6 +32,11 @@ func Register(management *config.ManagementContext) {
 		Clusters: management.Management.Clusters(""),
 	}
 	management.Management.Clusters("").Controller().AddHandler(p.sync)
+	K8sClientSet, err := kubernetes.NewForConfig(&management.RESTConfig)
+	if err != nil {
+		logrus.Errorf("Error generating k8s client %v", err)
+	}
+	p.K8sClientSet = K8sClientSet
 }
 
 func configChanged(cluster *v3.Cluster) bool {
@@ -127,16 +135,20 @@ func (p *Provisioner) updateCluster(cluster *v3.Cluster) error {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
 	logrus.Infof("Updating cluster [%s]", cluster.Name)
-	var apiEndpoint, serviceAccountToken, caCert string
+	var apiEndpoint, serviceAccountToken, caCert, secretName string
 	if needToProvision(cluster) {
 		apiEndpoint, serviceAccountToken, caCert, err = driver.Update(cluster.Name, cluster.Spec)
 		if err != nil {
 			_ = p.postUpdateClusterStatusError(cluster, err)
 			return fmt.Errorf("Failed to update the cluster [%s]: %v", cluster.Name, err)
 		}
+		secretName, err = p.setSecret(cluster, utils.ServiceAccountName, serviceAccountToken, utils.CaCertName, caCert)
+		if err != nil {
+			return fmt.Errorf("Failed to set secret for cluster [%s]: %v", cluster.Name, err)
+		}
 	}
 
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, secretName)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -151,16 +163,20 @@ func (p *Provisioner) createCluster(cluster *v3.Cluster) error {
 	}
 	logrus.Infof("Provisioning cluster [%s]", cluster.Name)
 
-	var apiEndpoint, serviceAccountToken, caCert string
+	var apiEndpoint, serviceAccountToken, caCert, secretName string
 	if needToProvision(cluster) {
 		apiEndpoint, serviceAccountToken, caCert, err = driver.Create(cluster.Name, cluster.Spec)
 		if err != nil {
 			_ = p.postUpdateClusterStatusError(cluster, err)
 			return fmt.Errorf("Failed to provision the cluster [%s]: %v", cluster.Name, err)
 		}
+		secretName, err = p.setSecret(cluster, utils.ServiceAccountName, serviceAccountToken, utils.CaCertName, caCert)
+		if err != nil {
+			return fmt.Errorf("Failed to set secret for cluster [%s]: %v", cluster.Name, err)
+		}
 	}
 
-	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, serviceAccountToken, caCert)
+	err = p.postUpdateClusterStatusSuccess(cluster, apiEndpoint, secretName)
 	if err != nil {
 		return fmt.Errorf("Failed to update status for cluster [%s]: %v", cluster.Name, err)
 	}
@@ -183,15 +199,14 @@ func (p *Provisioner) postUpdateClusterStatusError(cluster *v3.Cluster, userErro
 	return err
 }
 
-func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *v3.Cluster, apiEndpiont string, serviceAccountToken string, caCert string) error {
+func (p *Provisioner) postUpdateClusterStatusSuccess(cluster *v3.Cluster, apiEndpiont string, secretName string) error {
 	toUpdate, err := p.Clusters.Get(cluster.Name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	toUpdate.Status.AppliedSpec = cluster.Spec
 	toUpdate.Status.APIEndpoint = apiEndpiont
-	toUpdate.Status.ServiceAccountToken = serviceAccountToken
-	toUpdate.Status.CACert = caCert
+	toUpdate.Status.ServiceAccountSecretName = secretName
 	if !isClusterProvisioned(cluster) {
 		condition := newClusterCondition(v3.ClusterConditionProvisioned, "True", "Cluster provisioned successfully")
 		setClusterCondition(&toUpdate.Status, condition)
@@ -286,4 +301,13 @@ func isClusterProvisioned(cluster *v3.Cluster) bool {
 
 func needToProvision(cluster *v3.Cluster) bool {
 	return cluster.Spec.RancherKubernetesEngineConfig != nil || cluster.Spec.AzureKubernetesServiceConfig != nil || cluster.Spec.GoogleKubernetesEngineConfig != nil
+}
+
+func (p *Provisioner) setSecret(cluster *v3.Cluster, name1 string, value1 string, name2 string, value2 string) (string, error) {
+	data := make(map[string][]byte)
+	data[name1] = []byte(value1)
+	data[name2] = []byte(value2)
+	secretName := utils.GetSecretName(cluster)
+	err := utils.UpdateSecret(p.K8sClientSet, data, secretName)
+	return secretName, err
 }

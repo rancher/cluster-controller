@@ -2,21 +2,29 @@ package agent
 
 import (
 	"context"
-	"encoding/base64"
+	"fmt"
 	"net/url"
 	"sync"
 
 	clusterController "github.com/rancher/cluster-agent/controller"
+	"github.com/rancher/cluster-controller/controller/utils"
+	"github.com/rancher/rke/k8s"
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+)
+
+const (
+	SecretSuffix = "secret-token"
 )
 
 type Manager struct {
 	ManagementConfig rest.Config
 	LocalConfig      *rest.Config
 	controllers      sync.Map
+	K8sClientSet     *kubernetes.Clientset
 }
 
 type record struct {
@@ -26,9 +34,14 @@ type record struct {
 }
 
 func NewManager(management *config.ManagementContext) *Manager {
+	K8sClientSet, err := kubernetes.NewForConfig(&management.RESTConfig)
+	if err != nil {
+		logrus.Errorf("Error generating k8s client %v", err)
+	}
 	return &Manager{
 		ManagementConfig: management.RESTConfig,
 		LocalConfig:      management.LocalConfig,
+		K8sClientSet:     K8sClientSet,
 	}
 }
 
@@ -76,7 +89,7 @@ func (m *Manager) toRESTConfig(cluster *v3.Cluster) (*rest.Config, error) {
 		return m.LocalConfig, nil
 	}
 
-	if cluster.Status.APIEndpoint == "" || cluster.Status.CACert == "" || cluster.Status.ServiceAccountToken == "" {
+	if cluster.Status.APIEndpoint == "" || cluster.Status.ServiceAccountSecretName == "" {
 		return nil, nil
 	}
 
@@ -85,17 +98,17 @@ func (m *Manager) toRESTConfig(cluster *v3.Cluster) (*rest.Config, error) {
 		return nil, err
 	}
 
-	data, err := base64.StdEncoding.DecodeString(cluster.Status.CACert)
+	secretData, err := m.getSecret(cluster)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to get secret for cluster [%s]: %v", cluster.Name, err)
 	}
 
 	return &rest.Config{
 		Host:        u.Host,
 		Prefix:      u.Path,
-		BearerToken: cluster.Status.ServiceAccountToken,
+		BearerToken: string(secretData[utils.ServiceAccountName][:]),
 		TLSClientConfig: rest.TLSClientConfig{
-			CAData: data,
+			CAData: secretData[utils.CaCertName],
 		},
 	}, nil
 }
@@ -117,4 +130,28 @@ func (m *Manager) toRecord(ctx context.Context, cluster *v3.Cluster) (*record, e
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
 	return s, nil
+}
+
+func (m *Manager) getSecret(cluster *v3.Cluster) (map[string][]byte, error) {
+	secretName := utils.GetSecretName(cluster)
+	secret, err := k8s.GetSecret(m.K8sClientSet, secretName)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureFieldsExist(secret.Data, utils.ServiceAccountName, utils.CaCertName); err != nil {
+		return nil, err
+	}
+	return secret.Data, nil
+}
+
+func ensureFieldsExist(data map[string][]byte, name1 string, name2 string) error {
+	_, exists := data[name1]
+	if !exists {
+		return fmt.Errorf("%s not present in secret data", name1)
+	}
+	_, exists = data[name2]
+	if !exists {
+		return fmt.Errorf("%s not present in secret data", name2)
+	}
+	return nil
 }
