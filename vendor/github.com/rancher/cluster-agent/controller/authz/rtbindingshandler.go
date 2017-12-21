@@ -11,41 +11,56 @@ import (
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	typesrbacv1 "github.com/rancher/types/apis/rbac.authorization.k8s.io/v1"
 	"github.com/rancher/types/config"
+	"github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/cache"
 )
 
 const (
 	finalizerName  = "rtbFinalizer"
 	rtbOwnerLabel  = "io.cattle.rtb.owner"
 	projectIDLabel = "io.cattle.field.projectId"
+	prtbIndex      = "io.cattle.authz.prtb.projectname"
 )
 
 func Register(workload *config.ClusterContext) {
+	// Add cache informer to project role template bindings
+	informer := workload.Management.Management.ProjectRoleTemplateBindings("").Controller().Informer()
+	indexers := map[string]cache.IndexFunc{
+		prtbIndex: prtbIndexer,
+	}
+	informer.AddIndexers(indexers)
+
 	r := &roleHandler{
-		workload:   workload,
-		rtLister:   workload.Management.Management.RoleTemplates("").Controller().Lister(),
-		psptLister: workload.Management.Management.PodSecurityPolicyTemplates("").Controller().Lister(),
-		nsLister:   workload.Core.Namespaces("").Controller().Lister(),
-		rbLister:   workload.RBAC.RoleBindings("").Controller().Lister(),
-		crbLister:  workload.RBAC.ClusterRoleBindings("").Controller().Lister(),
-		crLister:   workload.RBAC.ClusterRoles("").Controller().Lister(),
-		pspLister:  workload.Extensions.PodSecurityPolicies("").Controller().Lister(),
+		workload:    workload,
+		prtbIndexer: informer.GetIndexer(),
+		rtLister:    workload.Management.Management.RoleTemplates("").Controller().Lister(),
+		psptLister:  workload.Management.Management.PodSecurityPolicyTemplates("").Controller().Lister(),
+		nsLister:    workload.Core.Namespaces("").Controller().Lister(),
+		rbLister:    workload.RBAC.RoleBindings("").Controller().Lister(),
+		crbLister:   workload.RBAC.ClusterRoleBindings("").Controller().Lister(),
+		crLister:    workload.RBAC.ClusterRoles("").Controller().Lister(),
+		pspLister:   workload.Extensions.PodSecurityPolicies("").Controller().Lister(),
 	}
 	workload.Management.Management.ProjectRoleTemplateBindings("").Controller().AddHandler(r.syncPRTB)
 	workload.Management.Management.ClusterRoleTemplateBindings("").Controller().AddHandler(r.syncCRTB)
+	workload.Management.Management.RoleTemplates("").Controller().AddHandler(r.syncRT)
+	workload.Core.Namespaces("").Controller().AddHandler(r.syncNS)
 }
 
 type roleHandler struct {
-	workload   *config.ClusterContext
-	rtLister   v3.RoleTemplateLister
-	psptLister v3.PodSecurityPolicyTemplateLister
-	nsLister   typescorev1.NamespaceLister
-	crLister   typesrbacv1.ClusterRoleLister
-	crbLister  typesrbacv1.ClusterRoleBindingLister
-	rbLister   typesrbacv1.RoleBindingLister
-	pspLister  typesextv1beta1.PodSecurityPolicyLister
+	workload    *config.ClusterContext
+	rtLister    v3.RoleTemplateLister
+	prtbIndexer cache.Indexer
+	psptLister  v3.PodSecurityPolicyTemplateLister
+	nsLister    typescorev1.NamespaceLister
+	crLister    typesrbacv1.ClusterRoleLister
+	crbLister   typesrbacv1.ClusterRoleBindingLister
+	rbLister    typesrbacv1.RoleBindingLister
+	pspLister   typesextv1beta1.PodSecurityPolicyLister
 }
 
 func (r *roleHandler) syncCRTB(key string, binding *v3.ClusterRoleTemplateBinding) error {
@@ -76,7 +91,9 @@ func (r *roleHandler) ensureCRTBDelete(key string, binding *v3.ClusterRoleTempla
 
 	for _, rb := range rbs {
 		if err := bindingCli.Delete(rb.Name, &metav1.DeleteOptions{}); err != nil {
-			return errors.Wrapf(err, "error deleting clusterrolebinding %v", rb.Name)
+			if err = checkDeleteErr(err); err != nil {
+				return errors.Wrapf(err, "error deleting clusterrolebinding %v", rb.Name)
+			}
 		}
 	}
 
@@ -199,7 +216,9 @@ func (r *roleHandler) ensurePRTBDelete(key string, binding *v3.ProjectRoleTempla
 
 		for _, rb := range rbs {
 			if err := bindingCli.Delete(rb.Name, &metav1.DeleteOptions{}); err != nil {
-				return errors.Wrapf(err, "error deleting rolebinding %v", rb.Name)
+				if err = checkDeleteErr(err); err != nil {
+					return errors.Wrapf(err, "error deleting rolebinding %v", rb.Name)
+				}
 			}
 		}
 	}
@@ -208,6 +227,67 @@ func (r *roleHandler) ensurePRTBDelete(key string, binding *v3.ProjectRoleTempla
 		_, err := r.workload.Management.Management.ProjectRoleTemplateBindings("").Update(binding)
 		return err
 	}
+	return nil
+}
+
+func (r *roleHandler) syncRT(key string, template *v3.RoleTemplate) error {
+	if template == nil {
+		return nil
+	}
+
+	if template.DeletionTimestamp != nil {
+		return r.ensureRTDelete(key, template)
+	}
+
+	return r.ensureRT(key, template)
+}
+
+func (r *roleHandler) ensureRT(key string, template *v3.RoleTemplate) error {
+	template = template.DeepCopy()
+	if r.addFinalizer(template) {
+		if _, err := r.workload.Management.Management.RoleTemplates("").Update(template); err != nil {
+			return errors.Wrapf(err, "couldn't set finalizer on %v", key)
+		}
+	}
+
+	roles := map[string]*v3.RoleTemplate{}
+	if err := r.gatherRoles(template, roles); err != nil {
+		return err
+	}
+
+	if err := r.ensureRoles(roles); err != nil {
+		return errors.Wrapf(err, "couldn't ensure roles")
+	}
+
+	return nil
+}
+
+func (r *roleHandler) ensureRTDelete(key string, template *v3.RoleTemplate) error {
+	if len(template.ObjectMeta.Finalizers) <= 0 || template.ObjectMeta.Finalizers[0] != finalizerName {
+		return nil
+	}
+
+	template = template.DeepCopy()
+
+	roles := map[string]*v3.RoleTemplate{}
+	if err := r.gatherRoles(template, roles); err != nil {
+		return err
+	}
+
+	roleCli := r.workload.K8sClient.RbacV1().ClusterRoles()
+	for _, role := range roles {
+		if err := roleCli.Delete(role.Name, &metav1.DeleteOptions{}); err != nil {
+			if err = checkDeleteErr(err); err != nil {
+				return errors.Wrapf(err, "error deleting clusterrole %v", role.Name)
+			}
+		}
+	}
+
+	if r.removeFinalizer(template) {
+		_, err := r.workload.Management.Management.RoleTemplates("").Update(template)
+		return err
+	}
+
 	return nil
 }
 
@@ -267,7 +347,7 @@ func (r *roleHandler) ensureRoles(rts map[string]*v3.RoleTemplate) error {
 			continue
 		}
 
-		if role, err := r.crLister.Get("", rt.Name); err == nil {
+		if role, err := r.crLister.Get("", rt.Name); err == nil && role != nil {
 			role = role.DeepCopy()
 			// TODO potentially check a version so that we don't do unnecessary updates
 			role.Rules = rt.Rules
@@ -275,6 +355,7 @@ func (r *roleHandler) ensureRoles(rts map[string]*v3.RoleTemplate) error {
 			if err != nil {
 				return errors.Wrapf(err, "couldn't update role %v", rt.Name)
 			}
+			continue
 		}
 
 		_, err := roleCli.Create(&rbacv1.ClusterRole{
@@ -294,7 +375,7 @@ func (r *roleHandler) ensureRoles(rts map[string]*v3.RoleTemplate) error {
 func (r *roleHandler) ensureClusterBinding(roleName string, binding *v3.ClusterRoleTemplateBinding) error {
 	bindingCli := r.workload.K8sClient.RbacV1().ClusterRoleBindings()
 	bindingName, objectMeta, subjects, roleRef := bindingParts(roleName, string(binding.UID), binding.Subject)
-	if _, err := r.crbLister.Get("", bindingName); err == nil {
+	if c, _ := r.crbLister.Get("", bindingName); c != nil {
 		return nil
 	}
 
@@ -310,10 +391,9 @@ func (r *roleHandler) ensureClusterBinding(roleName string, binding *v3.ClusterR
 func (r *roleHandler) ensureBinding(ns, roleName string, binding *v3.ProjectRoleTemplateBinding) error {
 	bindingCli := r.workload.K8sClient.RbacV1().RoleBindings(ns)
 	bindingName, objectMeta, subjects, roleRef := bindingParts(roleName, string(binding.UID), binding.Subject)
-	if _, err := r.crbLister.Get("", bindingName); err == nil {
+	if b, _ := r.rbLister.Get(ns, bindingName); b != nil {
 		return nil
 	}
-
 	_, err := bindingCli.Create(&rbacv1.RoleBinding{
 		ObjectMeta: objectMeta,
 		Subjects:   subjects,
@@ -334,4 +414,23 @@ func bindingParts(roleName, parentUID string, subject rbacv1.Subject) (string, m
 			Kind: "ClusterRole",
 			Name: roleName,
 		}
+}
+
+func prtbIndexer(obj interface{}) ([]string, error) {
+	prtb, ok := obj.(*v3.ProjectRoleTemplateBinding)
+	if !ok {
+		logrus.Infof("object %v is not Project Role Template Binding", obj)
+		return []string{}, nil
+	}
+
+	return []string{prtb.ProjectName}, nil
+}
+
+func checkDeleteErr(e error) error {
+	if err, ok := e.(*k8serr.StatusError); ok {
+		if err.ErrStatus.Code == 404 {
+			return nil
+		}
+	}
+	return e
 }
