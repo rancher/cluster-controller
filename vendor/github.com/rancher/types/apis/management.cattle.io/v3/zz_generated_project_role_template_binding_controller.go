@@ -23,8 +23,9 @@ var (
 	ProjectRoleTemplateBindingResource = metav1.APIResource{
 		Name:         "projectroletemplatebindings",
 		SingularName: "projectroletemplatebinding",
-		Namespaced:   false,
-		Kind:         ProjectRoleTemplateBindingGroupVersionKind.Kind,
+		Namespaced:   true,
+
+		Kind: ProjectRoleTemplateBindingGroupVersionKind.Kind,
 	}
 )
 
@@ -188,6 +189,12 @@ func (s *projectRoleTemplateBindingClient) List(opts metav1.ListOptions) (*Proje
 
 func (s *projectRoleTemplateBindingClient) Watch(opts metav1.ListOptions) (watch.Interface, error) {
 	return s.objectClient.Watch(opts)
+}
+
+// Patch applies the patch and returns the patched deployment.
+func (s *projectRoleTemplateBindingClient) Patch(o *ProjectRoleTemplateBinding, data []byte, subresources ...string) (*ProjectRoleTemplateBinding, error) {
+	obj, err := s.objectClient.Patch(o.Name, o, data, subresources...)
+	return obj.(*ProjectRoleTemplateBinding), err
 }
 
 func (s *projectRoleTemplateBindingClient) DeleteCollection(deleteOpts *metav1.DeleteOptions, listOpts metav1.ListOptions) error {
