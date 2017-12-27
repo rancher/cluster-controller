@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/types/factory"
 	"github.com/rancher/types/mapper"
 	"k8s.io/api/core/v1"
+	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/kubernetes/staging/src/k8s.io/api/apps/v1beta2"
 )
 
@@ -23,6 +24,9 @@ var (
 	Schemas = factory.Schemas(&Version).
 		// Namespace must be first
 		Init(namespaceTypes).
+		Init(ingressTypes).
+		Init(secretTypes).
+		Init(serviceTypes).
 		Init(podTypes).
 		Init(deploymentTypes).
 		Init(statefulSetTypes).
@@ -84,19 +88,19 @@ func statefulSetTypes(schemas *types.Schemas) *types.Schemas {
 				To:   "deploymentStrategy/orderedConfig/partition",
 			},
 			m.SetValue{
-				From:  "updateStrategy/type",
+				Field: "updateStrategy/type",
 				IfEq:  "OnDelete",
 				Value: true,
 				To:    "deploymentStrategy/orderedConfig/onDelete",
 			},
 			m.SetValue{
-				From:  "podManagementPolicy",
+				Field: "podManagementPolicy",
 				IfEq:  "Parallel",
 				Value: "Parallel",
 				To:    "deploymentStrategy/kind",
 			},
 			m.SetValue{
-				From:  "podManagementPolicy",
+				Field: "podManagementPolicy",
 				IfEq:  "OrderedReady",
 				Value: "Ordered",
 				To:    "deploymentStrategy/kind",
@@ -157,7 +161,7 @@ func daemonSet(schemas *types.Schemas) *types.Schemas {
 	return schemas.
 		AddMapperForType(&Version, v1beta2.DaemonSetSpec{},
 			m.SetValue{
-				From:  "updateStrategy/type",
+				Field: "updateStrategy/type",
 				IfEq:  "OnDelete",
 				Value: true,
 				To:    "deploymentStrategy/globalConfig/onDelete",
@@ -263,6 +267,7 @@ func podTypes(schemas *types.Schemas) *types.Schemas {
 			mapper.NamespaceMapper{},
 			mapper.InitContainerMapper{},
 			mapper.SchedulingMapper{},
+			m.Move{From: "tolerations", To: "scheduling/tolerations", DestDefined: true},
 			&m.Embed{Field: "securityContext"},
 			&m.Drop{Field: "serviceAccount"},
 			&m.SliceToMap{
@@ -302,5 +307,63 @@ func podTypes(schemas *types.Schemas) *types.Schemas {
 		}{}).
 		MustImport(&Version, v1.Pod{}, projectOverride{}, struct {
 			WorkloadID string `norman:"type=reference[workload]"`
+		}{})
+}
+
+func serviceTypes(schemas *types.Schemas) *types.Schemas {
+	return schemas.
+		TypeName("endpoint", v1.Endpoints{}).
+		AddMapperForType(&Version, v1.ServiceSpec{},
+			&m.Move{From: "type", To: "serviceKind"},
+			&m.Move{From: "externalName", To: "hostname"},
+			&m.Move{From: "clusterIP", To: "clusterIp"},
+			ServiceKindMapper{},
+		).
+		AddMapperForType(&Version, v1.Service{},
+			&m.LabelField{Field: "workloadId"},
+			&m.Drop{Field: "status"},
+			&m.Move{From: "serviceKind", To: "kind"},
+			&mapper.NamespaceIDMapper{},
+			&m.AnnotationField{Field: "targetWorkloadIds", Object: true},
+			&m.AnnotationField{Field: "targetServiceIds", Object: true},
+		).
+		AddMapperForType(&Version, v1.Endpoints{},
+			&EndpointAddressMapper{},
+			&mapper.NamespaceIDMapper{},
+		).
+		MustImport(&Version, v1.Service{}, projectOverride{}, struct {
+			WorkloadID        string `json:"workloadId" norman:"type=reference[workload]"`
+			TargetWorkloadIDs string `json:"targetWorkloadIds" norman:"type=array[reference[workload]]"`
+			TargetServiceIDs  string `json:"targetServiceIds" norman:"type=array[reference[service]]"`
+			Kind              string `json:"kind" norman:"type=enum,options=Alias|ARecord|CName|ClusterIP|NodeIP|LoadBalancer"`
+		}{}).
+		MustImportAndCustomize(&Version, v1.Endpoints{}, func(schema *types.Schema) {
+			schema.CodeName = "Endpoint"
+		}, projectOverride{}, struct {
+			Targets []Target `json:"targets"`
+			PodIDs  []string `json:"podIds" norman:"type=array[reference[pod]]"`
+		}{})
+}
+
+func ingressTypes(schemas *types.Schemas) *types.Schemas {
+	return schemas.
+		AddMapperForType(&Version, v1beta1.HTTPIngressPath{},
+			&m.Embed{Field: "backend"},
+		).
+		AddMapperForType(&Version, v1beta1.Ingress{},
+			&mapper.NamespaceIDMapper{},
+			&m.Move{From: "backend", To: "defaultBackend"},
+		).
+		AddMapperForType(&Version, v1beta1.IngressTLS{},
+			&m.Move{From: "secretName", To: "certificateName"},
+		).
+		MustImport(&Version, v1beta1.IngressBackend{}, struct {
+			WorkloadIDs string `json:"workloadIds" norman:"type=array[reference[workload]]"`
+			ServiceName string `norman:"type=reference[service]"`
+		}{}).
+		MustImport(&Version, v1beta1.IngressTLS{}, struct {
+			SecretName string `norman:"type=reference[certificate]"`
+		}{}).
+		MustImport(&Version, v1beta1.Ingress{}, projectOverride{}, struct {
 		}{})
 }

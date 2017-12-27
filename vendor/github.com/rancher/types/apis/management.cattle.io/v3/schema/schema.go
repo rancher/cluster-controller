@@ -87,20 +87,24 @@ func clusterTypes(schemas *types.Schemas) *types.Schemas {
 
 func authzTypes(schemas *types.Schemas) *types.Schemas {
 	return schemas.
-		AddMapperForType(&Version, v3.Project{},
-			m.DisplayName{},
-		).
+		MustImport(&Version, v3.ProjectStatus{}).
+		AddMapperForType(&Version, v3.Project{}, m.DisplayName{},
+			&m.Embed{Field: "status"}).
+		AddMapperForType(&Version, v3.GlobalRole{}, m.DisplayName{}).
+		AddMapperForType(&Version, v3.RoleTemplate{}, m.DisplayName{}).
 		AddMapperForType(&Version, v3.ProjectRoleTemplateBinding{},
 			&m.Move{From: "subject/name", To: "subjectName"},
 			&m.Move{From: "subject/kind", To: "subjectKind"},
 			&m.Move{From: "subject/namespace", To: "subjectNamespace"},
 			&m.Drop{Field: "subject"},
+			&mapper.NamespaceIDMapper{},
 		).
 		AddMapperForType(&Version, v3.ClusterRoleTemplateBinding{},
 			&m.Move{From: "subject/name", To: "subjectName"},
 			&m.Move{From: "subject/kind", To: "subjectKind"},
 			&m.Move{From: "subject/namespace", To: "subjectNamespace"},
 			&m.Drop{Field: "subject"},
+			&mapper.NamespaceIDMapper{},
 		).
 		AddMapperForType(&Version, v3.GlobalRoleBinding{},
 			&m.Move{From: "subject/name", To: "subjectName"},

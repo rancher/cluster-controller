@@ -75,8 +75,8 @@ func (p *prtbLifecycle) ensureBindings(binding *v3.ProjectRoleTemplateBinding) e
 		return errors.Errorf("cannot create binding because cluster %v was not found", clusterName)
 	}
 
-	projectRoleName := strings.ToLower(fmt.Sprintf("%v-projectmembers", projectName))
-	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermembers", clusterName))
+	projectRoleName := strings.ToLower(fmt.Sprintf("%v-projectmember", projectName))
+	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermember", clusterName))
 
 	if err := p.mgr.ensureBinding(projectRoleName, projectResource, projectName, binding.Subject, binding.ObjectMeta,
 		binding.TypeMeta, proj.ObjectMeta, proj.TypeMeta); err != nil {
@@ -116,7 +116,7 @@ func (c *crtbLifecycle) ensureBindings(binding *v3.ClusterRoleTemplateBinding) e
 		return errors.Errorf("cannot create binding because cluster %v was not found", clusterName)
 	}
 
-	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermembers", clusterName))
+	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermember", clusterName))
 
 	return c.mgr.ensureBinding(clusterRoleName, clusterResource, clusterName, binding.Subject, binding.ObjectMeta,
 		binding.TypeMeta, cluster.ObjectMeta, cluster.TypeMeta)
