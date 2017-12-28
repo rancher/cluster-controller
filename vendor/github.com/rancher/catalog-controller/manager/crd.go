@@ -6,16 +6,19 @@ import (
 
 	"strings"
 
+	"strconv"
+
 	"github.com/pkg/errors"
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/sirupsen/logrus"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/rancher/catalog-controller/utils"
 )
 
 const (
-	CatalogNameLabel  = "io.cattle.catalog.name"
-	TemplateNameLabel = "io.cattle.catalog.template_name"
+	CatalogNameLabel  = "catalog.cattle.io/name"
+	TemplateNameLabel = "catalog.cattle.io/template_name"
 )
 
 // update will sync templates with catalog without costing too much
@@ -72,27 +75,18 @@ func (m *Manager) update(catalog *v3.Catalog, templates []v3.Template) error {
 			}
 			updateTemplate.Spec = template.Spec
 			logrus.Debugf("Updating template %s", name)
-			updateTemplate, err = m.templateClient.Update(updateTemplate)
+			result, err := m.templateClient.Update(updateTemplate)
 			if err != nil {
 				if strings.Contains(err.Error(), "request is too large") || strings.Contains(err.Error(), "exceeding the max size") {
-					updateTemplate.Spec.Icon = ""
-					if _, err := m.templateClient.Update(updateTemplate); err != nil {
-						return err
-					}
-					if err := m.deleteTemplateVersions(*updateTemplate); err != nil {
-						return err
-					}
-					if err := m.createTemplateVersions(updateTemplate.Spec.Versions, *updateTemplate); err != nil {
-						return err
-					}
+					logrus.Warnf("Template %s size is too large. Skipping", template.Name)
 					continue
 				}
 				return errors.Wrapf(err, "failed to update template %s", template.Name)
 			}
-			if err := m.deleteTemplateVersions(*updateTemplate); err != nil {
+			if err := m.deleteTemplateVersions(*result); err != nil {
 				return err
 			}
-			if err := m.createTemplateVersions(updateTemplate.Spec.Versions, *updateTemplate); err != nil {
+			if err := m.createTemplateVersions(updateTemplate.Spec.Versions, *result); err != nil {
 				return err
 			}
 		}
@@ -118,14 +112,7 @@ func (m *Manager) update(catalog *v3.Catalog, templates []v3.Template) error {
 			if err != nil {
 				// hack for the image size that are too big
 				if strings.Contains(err.Error(), "request is too large") || strings.Contains(err.Error(), "exceeding the max size") {
-					template.Spec.Icon = ""
-					template, err := m.templateClient.Create(&template)
-					if err != nil {
-						return err
-					}
-					if err := m.createTemplateVersions(template.Spec.Versions, *template); err != nil {
-						return err
-					}
+					logrus.Warnf("Template %s size is too large. Skipping", template.Name)
 					continue
 				}
 				return err
@@ -143,10 +130,21 @@ func (m *Manager) createTemplateVersions(versionsSpec []v3.TemplateVersionSpec, 
 	rollback := false
 	for _, spec := range versionsSpec {
 		templateVersion := v3.TemplateVersion{}
+		spec.UpgradeVersionLinks = map[string]string{}
+		for _, versionSpec := range template.Spec.Versions {
+			if showUpgradeLinks(spec.Version, versionSpec.Version, versionSpec.UpgradeFrom) {
+				revision := versionSpec.Version
+				if spec.Revision != nil {
+					revision = strconv.Itoa(*versionSpec.Revision)
+				}
+				spec.UpgradeVersionLinks[versionSpec.Version] = fmt.Sprintf("%s-%s", template.Name, revision)
+			}
+		}
+		spec.ExternalID = fmt.Sprintf("catalog://?catalog=%s&base=%s&template=%s&version=%s", template.Spec.CatalogID, template.Spec.Base, template.Spec.FolderName, spec.Version)
 		templateVersion.Spec = spec
-		revision := 0
+		revision := spec.Version
 		if spec.Revision != nil {
-			revision = *spec.Revision
+			revision = strconv.Itoa(*spec.Revision)
 		}
 		templateVersion.APIVersion = v3.TemplateVersionGroupVersionKind.Group + "/" + v3.TemplateVersionGroupVersionKind.Version
 		templateVersion.Kind = v3.TemplateVersionGroupVersionKind.Kind
@@ -198,4 +196,18 @@ func (m *Manager) deleteTemplateVersions(template v3.Template) error {
 		}
 	}
 	return nil
+}
+
+func showUpgradeLinks(version, upgradeVersion, upgradeFrom string) bool {
+	if !utils.VersionGreaterThan(upgradeVersion, version) {
+		return false
+	}
+	if upgradeFrom != "" {
+		satisfiesRange, err := utils.VersionSatisfiesRange(version, upgradeFrom)
+		if err != nil {
+			return false
+		}
+		return satisfiesRange
+	}
+	return true
 }
