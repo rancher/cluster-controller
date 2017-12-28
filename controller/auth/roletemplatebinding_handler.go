@@ -81,14 +81,20 @@ func (p *prtbLifecycle) ensureBindings(binding *v3.ProjectRoleTemplateBinding) e
 		return errors.Errorf("cannot create binding because cluster %v was not found", clusterName)
 	}
 
-	projectRoleName := strings.ToLower(fmt.Sprintf("%v-projectmember", projectName))
 	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermember", clusterName))
+	isOwnerRole := binding.RoleTemplateName == "project-owner"
+	var projectRoleName string
+	if isOwnerRole {
+		projectRoleName = strings.ToLower(fmt.Sprintf("%v-projectowner", projectName))
+	} else {
+		projectRoleName = strings.ToLower(fmt.Sprintf("%v-projectmember", projectName))
+	}
 
-	if err := p.mgr.ensureMembershipBinding(projectRoleName, projectResource, projectName, binding.Subject, binding.ObjectMeta,
+	if err := p.mgr.ensureMembershipBinding(projectRoleName, projectResource, projectName, isOwnerRole, binding.Subject, binding.ObjectMeta,
 		binding.TypeMeta, proj.ObjectMeta, proj.TypeMeta); err != nil {
 		return err
 	}
-	if err := p.mgr.ensureMembershipBinding(clusterRoleName, clusterResource, clusterName, binding.Subject, binding.ObjectMeta,
+	if err := p.mgr.ensureMembershipBinding(clusterRoleName, clusterResource, clusterName, false, binding.Subject, binding.ObjectMeta,
 		binding.TypeMeta, cluster.ObjectMeta, cluster.TypeMeta); err != nil {
 		return err
 	}
@@ -126,9 +132,15 @@ func (c *crtbLifecycle) ensureBindings(binding *v3.ClusterRoleTemplateBinding) e
 		return errors.Errorf("cannot create binding because cluster %v was not found", clusterName)
 	}
 
-	clusterRoleName := strings.ToLower(fmt.Sprintf("%v-clustermember", clusterName))
+	isOwnerRole := binding.RoleTemplateName == "cluster-owner"
+	var clusterRoleName string
+	if isOwnerRole {
+		clusterRoleName = strings.ToLower(fmt.Sprintf("%v-clusterowner", clusterName))
+	} else {
+		clusterRoleName = strings.ToLower(fmt.Sprintf("%v-clustermember", clusterName))
+	}
 
-	if err := c.mgr.ensureMembershipBinding(clusterRoleName, clusterResource, clusterName, binding.Subject, binding.ObjectMeta,
+	if err := c.mgr.ensureMembershipBinding(clusterRoleName, clusterResource, clusterName, isOwnerRole, binding.Subject, binding.ObjectMeta,
 		binding.TypeMeta, cluster.ObjectMeta, cluster.TypeMeta); err != nil {
 		return err
 	}
@@ -145,9 +157,22 @@ type manager struct {
 	mgmt      *config.ManagementContext
 }
 
-func (m *manager) ensureRole(roleName, resource, resourceName string, ownerMeta metav1.ObjectMeta, ownerTypeMeta metav1.TypeMeta) error {
+func (m *manager) ensureRole(roleName, resource, resourceName string, isOwnerRole bool, ownerMeta metav1.ObjectMeta, ownerTypeMeta metav1.TypeMeta) error {
 	roleCli := m.mgmt.RBAC.ClusterRoles("")
 	if cr, _ := m.crLister.Get("", roleName); cr == nil {
+		rules := []v1.PolicyRule{
+			{
+				APIGroups:     []string{"management.cattle.io"},
+				Resources:     []string{resource},
+				ResourceNames: []string{resourceName},
+				Verbs:         []string{"get"},
+			},
+		}
+		if isOwnerRole {
+			rules[0].Verbs = []string{"*"}
+		} else {
+			rules[0].Verbs = []string{"get"}
+		}
 		_, err := roleCli.Create(&v1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: roleName,
@@ -160,23 +185,16 @@ func (m *manager) ensureRole(roleName, resource, resourceName string, ownerMeta 
 					},
 				},
 			},
-			Rules: []v1.PolicyRule{
-				{
-					APIGroups:     []string{"management.cattle.io"},
-					Resources:     []string{resource},
-					ResourceNames: []string{resourceName},
-					Verbs:         []string{"get"},
-				},
-			},
+			Rules: rules,
 		})
 		return err
 	}
 	return nil
 }
 
-func (m *manager) ensureMembershipBinding(roleName, resource, resourceName string, subject v1.Subject, bindingOwnerMeta metav1.ObjectMeta,
+func (m *manager) ensureMembershipBinding(roleName, resource, resourceName string, isOwnerRole bool, subject v1.Subject, bindingOwnerMeta metav1.ObjectMeta,
 	bindingOwnerTypeMeta metav1.TypeMeta, roleOwnerMeta metav1.ObjectMeta, roleOwnerTypeMeta metav1.TypeMeta) error {
-	if err := m.ensureRole(roleName, resource, resourceName, roleOwnerMeta, roleOwnerTypeMeta); err != nil {
+	if err := m.ensureRole(roleName, resource, resourceName, isOwnerRole, roleOwnerMeta, roleOwnerTypeMeta); err != nil {
 		return err
 	}
 	name := strings.ToLower(fmt.Sprintf("%v-%v-%v", roleName, subject.Kind, subject.Name))
