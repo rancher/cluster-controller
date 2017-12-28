@@ -16,6 +16,6 @@ func Register(ctx context.Context, management *config.ManagementContext) {
 	management.Management.ClusterRoleTemplateBindings("").AddLifecycle("mgmt-auth-crtb-controller", crtb)
 	management.Management.GlobalRoles("").AddLifecycle("mgmt-auth-gr-controller", gr)
 	management.Management.GlobalRoleBindings("").AddLifecycle("mgmt-auth-grb-controller", grb)
-	management.Management.Projects("").AddLifecycle("mgmt-project-ns-controller", p)
-	management.Management.Clusters("").AddLifecycle("mgmt-cluster-ns-controller", c)
+	management.Management.Projects("").AddLifecycle("mgmt-project-rbac-controller", p)
+	management.Management.Clusters("").AddLifecycle("mgmt-cluster-rbac-controller", c)
 }
