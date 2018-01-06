@@ -87,6 +87,9 @@ func (s *Syncer) addToClusterConfig(machine *v3.Machine) error {
 	needToAdd := true
 	for _, node := range cluster.Spec.RancherKubernetesEngineConfig.Nodes {
 		if node.MachineName == machine.Name {
+			machine.Status.NodeConfig.MachineName = machine.Name
+			machine.Status.NodeConfig.Role = machine.Spec.RequestedRoles
+			machine.Status.NodeConfig.HostnameOverride = machine.Spec.RequestedHostname
 			updatedNodes = append(updatedNodes, *machine.Status.NodeConfig)
 			needToAdd = false
 			continue
@@ -94,6 +97,9 @@ func (s *Syncer) addToClusterConfig(machine *v3.Machine) error {
 		updatedNodes = append(updatedNodes, node)
 	}
 	if needToAdd {
+		machine.Status.NodeConfig.MachineName = machine.Name
+		machine.Status.NodeConfig.Role = machine.Spec.RequestedRoles
+		machine.Status.NodeConfig.HostnameOverride = machine.Spec.RequestedHostname
 		updatedNodes = append(updatedNodes, *machine.Status.NodeConfig)
 	}
 	cluster.Spec.RancherKubernetesEngineConfig.Nodes = updatedNodes
