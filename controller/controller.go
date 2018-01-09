@@ -13,6 +13,7 @@ import (
 	"github.com/rancher/cluster-controller/controller/machinessyncer"
 	"github.com/rancher/cluster-controller/controller/namespace"
 	"github.com/rancher/cluster-controller/controller/secrets"
+	helmController "github.com/rancher/helm-controller/controller"
 	machineController "github.com/rancher/machine-controller/controller"
 	"github.com/rancher/types/config"
 )
@@ -29,4 +30,5 @@ func Register(ctx context.Context, management *config.ManagementContext) {
 	machinessyncer.Register(management)
 	secrets.Register(management)
 	namespace.Register(management)
+	helmController.Register(management)
 }
