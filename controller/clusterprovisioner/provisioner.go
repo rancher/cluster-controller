@@ -47,14 +47,14 @@ func configChanged(cluster *v3.Cluster) bool {
 
 func (p *Provisioner) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
 	logrus.Infof("Deleting cluster [%s]", cluster.Name)
-	if needToProvision(cluster) && v3.ClusterConditionProvisioned.IsTrue(cluster) {
+	if needToProvision(cluster) {
 		for i := 0; i < 4; i++ {
 			err := driver.Remove(cluster.Name, cluster.Spec)
 			if err == nil {
 				break
 			}
 			if i == 3 {
-				return cluster, fmt.Errorf("Failed to remove the cluster [%s]: %v", cluster.Name, err)
+				return cluster, fmt.Errorf("failed to remove the cluster [%s]: %v", cluster.Name, err)
 			}
 			time.Sleep(1 * time.Second)
 		}
@@ -80,7 +80,13 @@ func (p *Provisioner) Create(cluster *v3.Cluster) (*v3.Cluster, error) {
 
 func (p *Provisioner) reconcileCluster(cluster *v3.Cluster, create bool) (*v3.Cluster, error) {
 	if needToProvision(cluster) {
-		newObj, err := v3.ClusterConditionProvisioned.Do(cluster, func() (runtime.Object, error) {
+		newObj, err := v3.ClusterConditionProvisioned.DoUntilTrue(cluster, func() (runtime.Object, error) {
+			// Update status
+			cluster, err := p.Clusters.Update(cluster)
+			if err != nil {
+				return nil, err
+			}
+
 			logrus.Infof("Provisioning cluster [%s]", cluster.Name)
 			var apiEndpoint, serviceAccountToken, caCert string
 			ready, spec, err := p.reconcileSpec(cluster.Spec, cluster.Name)
@@ -100,10 +106,32 @@ func (p *Provisioner) reconcileCluster(cluster *v3.Cluster, create bool) (*v3.Cl
 			if err != nil {
 				return nil, errors.Wrapf(err, "Failed to provision cluster [%s]", cluster.Name)
 			}
-			cluster.Status.AppliedSpec = cluster.Spec
-			cluster.Status.APIEndpoint = apiEndpoint
-			cluster.Status.ServiceAccountToken = serviceAccountToken
-			cluster.Status.CACert = caCert
+
+			saved := false
+			for i := 0; i < 20; i++ {
+				cluster, err = p.Clusters.Get(cluster.Name, metav1.GetOptions{})
+				if err != nil {
+					return cluster, err
+				}
+
+				cluster.Status.AppliedSpec = cluster.Spec
+				cluster.Status.APIEndpoint = apiEndpoint
+				cluster.Status.ServiceAccountToken = serviceAccountToken
+				cluster.Status.CACert = caCert
+
+				if cluster, err = p.Clusters.Update(cluster); err == nil {
+					saved = true
+					break
+				} else {
+					logrus.Errorf("failed to update cluster [%s]: %v", cluster.Name, err)
+					time.Sleep(2)
+				}
+			}
+
+			if !saved {
+				return cluster, fmt.Errorf("failed to update cluster")
+			}
+
 			logrus.Infof("Provisioned cluster [%s]", cluster.Name)
 			return cluster, nil
 		})
