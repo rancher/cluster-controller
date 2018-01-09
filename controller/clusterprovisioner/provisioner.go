@@ -67,26 +67,26 @@ func (p *Provisioner) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
 	}
 	logrus.Infof("Deleted cluster [%s]", cluster.Name)
 
-	return cluster, nil
+	return nil, nil
 }
 
 func (p *Provisioner) Updated(cluster *v3.Cluster) (*v3.Cluster, error) {
 	if v3.ClusterConditionProvisioned.IsTrue(cluster) && configChanged(cluster) {
 		return p.reconcileCluster(cluster, false)
 	}
-	return cluster, nil
+	return nil, nil
 }
 
 func (p *Provisioner) Create(cluster *v3.Cluster) (*v3.Cluster, error) {
 	if v3.ClusterConditionProvisioned.IsTrue(cluster) {
-		return cluster, nil
+		return nil, nil
 	}
 	return p.reconcileCluster(cluster, true)
 }
 
 func (p *Provisioner) reconcileCluster(cluster *v3.Cluster, create bool) (*v3.Cluster, error) {
-	newObj, err := v3.ClusterConditionProvisioned.Do(cluster, func() (runtime.Object, error) {
-		if needToProvision(cluster) {
+	if needToProvision(cluster) {
+		newObj, err := v3.ClusterConditionProvisioned.Do(cluster, func() (runtime.Object, error) {
 			logrus.Infof("Provisioning cluster [%s]", cluster.Name)
 			var apiEndpoint, serviceAccountToken, caCert string
 			var err error
@@ -96,7 +96,7 @@ func (p *Provisioner) reconcileCluster(cluster *v3.Cluster, create bool) (*v3.Cl
 				apiEndpoint, serviceAccountToken, caCert, err = driver.Update(cluster.Name, cluster.Spec)
 			}
 			if err != nil {
-				return cluster, errors.Wrapf(err, "Failed to provision cluster [%s]", cluster.Name)
+				return nil, errors.Wrapf(err, "Failed to provision cluster [%s]", cluster.Name)
 			}
 
 			cluster.Status.AppliedSpec = cluster.Spec
@@ -104,11 +104,12 @@ func (p *Provisioner) reconcileCluster(cluster *v3.Cluster, create bool) (*v3.Cl
 			cluster.Status.ServiceAccountToken = serviceAccountToken
 			cluster.Status.CACert = caCert
 			logrus.Infof("Provisioned cluster [%s]", cluster.Name)
-		}
-		return cluster, nil
-	})
+			return cluster, nil
+		})
+		return newObj.(*v3.Cluster), err
+	}
 
-	return newObj.(*v3.Cluster), err
+	return nil, nil
 }
 
 func (p *Provisioner) GetName() string {
