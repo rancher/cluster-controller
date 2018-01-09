@@ -103,7 +103,8 @@ type mgr struct {
 
 func (m *mgr) createDefaultProject(obj *v3.Cluster) (runtime.Object, error) {
 	return v3.ClusterConditionconditionDefautlProjectCreated.DoUntilTrue(obj, func() (runtime.Object, error) {
-		p, _ := m.projectLister.Get(obj.Name, "default")
+		projectName := "rancher-default"
+		p, _ := m.projectLister.Get(obj.Name, projectName)
 		if p != nil {
 			return obj, nil
 		}
@@ -120,7 +121,7 @@ func (m *mgr) createDefaultProject(obj *v3.Cluster) (runtime.Object, error) {
 
 		_, err = m.mgmt.Management.Projects(obj.Name).Create(&v3.Project{
 			ObjectMeta: v1.ObjectMeta{
-				Name: "default",
+				Name: projectName,
 				Annotations: map[string]string{
 					creatorIDAnn: creatorID,
 				},
@@ -205,6 +206,7 @@ func (m *mgr) reconcileResourceToNamespace(obj runtime.Object) (runtime.Object, 
 		if err != nil {
 			return obj, condition.Error("MissingTypeMetadata", err)
 		}
+
 		ns, _ := m.nsLister.Get("", o.GetName())
 		if ns == nil {
 			nsClient := m.mgmt.K8sClient.CoreV1().Namespaces()
