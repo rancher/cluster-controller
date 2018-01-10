@@ -3,13 +3,16 @@ package clusterstats
 import (
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
-	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 type StatsAggregator struct {
+	Machines v3.MachineLister
+}
+
+type MachineSyncer struct {
 	Clusters v3.ClusterInterface
 }
 
@@ -22,84 +25,46 @@ type ClusterNodeData struct {
 	ConditionNoMemoryPressureStatus v1.ConditionStatus
 }
 
-var stats map[string]map[string]*ClusterNodeData
-var nodeNameToClusterName map[string]string
+func Register(management *config.ManagementContext) {
+	clustersClient := management.Management.Clusters("")
+	machinesClient := management.Management.Machines("")
+	m := &MachineSyncer{
+		Clusters: clustersClient,
+	}
+	machinesClient.AddLifecycle(m.GetName(), m)
 
-func Register(cluster *config.ManagementContext) {
-	stats = make(map[string]map[string]*ClusterNodeData)
-	nodeNameToClusterName = make(map[string]string)
 	s := &StatsAggregator{
-		Clusters: cluster.Management.Clusters(""),
+		Machines: management.Management.Machines("").Controller().Lister(),
 	}
-	cluster.Management.Machines("").Controller().AddHandler(s.sync)
+	clustersClient.AddLifecycle(s.GetName(), s)
 }
 
-func (s *StatsAggregator) sync(key string, clusterNode *v3.Machine) error {
-	logrus.Debugf("Syncing clusternode [%s]", key)
-	if clusterNode == nil {
-		return s.deleteStats(key)
-	}
-	return s.addOrUpdateStats(clusterNode)
+func (s *StatsAggregator) Create(cluster *v3.Cluster) (*v3.Cluster, error) {
+	return s.update(cluster)
 }
 
-func (s *StatsAggregator) deleteStats(key string) error {
-	if _, exists := nodeNameToClusterName[key]; !exists {
-		logrus.Debugf("ClusterNode [%s] already deleted from stats", key)
-		return nil
+func (s *StatsAggregator) Updated(cluster *v3.Cluster) (*v3.Cluster, error) {
+	return s.update(cluster)
+}
+
+func (s *StatsAggregator) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
+	return s.update(cluster)
+}
+
+func (s *StatsAggregator) update(cluster *v3.Cluster) (*v3.Cluster, error) {
+	err := s.aggregate(cluster, cluster.Name)
+	if err != nil {
+		return nil, err
 	}
-	clusterName, clusterNodeName := nodeNameToClusterName[key], key
-	cluster, err := s.getCluster(clusterName)
+	return cluster, nil
+}
+
+func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) error {
+	machines, err := s.Machines.List("", labels.Everything())
 	if err != nil {
 		return err
 	}
-	oldData := stats[clusterName][clusterNodeName]
-	if _, exists := stats[clusterName][clusterNodeName]; exists {
-		delete(stats[clusterName], clusterNodeName)
-		delete(nodeNameToClusterName, clusterNodeName)
-		logrus.Debugf("ClusterNode [%s] stats deleted", key)
-	}
-	s.aggregate(cluster, clusterName)
-	err = s.update(cluster)
-	if err != nil {
-		stats[clusterName][clusterNodeName] = oldData
-		return err
-	}
-	logrus.Debugf("Successfully updated cluster [%s] stats", clusterName)
-	return nil
-}
 
-func (s *StatsAggregator) addOrUpdateStats(clusterNode *v3.Machine) error {
-	clusterName, clusterNodeName := clusterNode.Status.ClusterName, clusterNode.Status.NodeName
-	cluster, err := s.getCluster(clusterName)
-	if err != nil {
-		return err
-	}
-	if _, exists := stats[clusterName]; !exists {
-		stats[clusterName] = make(map[string]*ClusterNodeData)
-	}
-
-	oldData := stats[clusterName][clusterNodeName]
-	newData := &ClusterNodeData{
-		Capacity:    clusterNode.Status.NodeStatus.Capacity,
-		Allocatable: clusterNode.Status.NodeStatus.Allocatable,
-		Requested:   clusterNode.Status.Requested,
-		Limits:      clusterNode.Status.Limits,
-		ConditionNoDiskPressureStatus:   getNodeConditionByType(clusterNode.Status.NodeStatus.Conditions, v1.NodeDiskPressure).Status,
-		ConditionNoMemoryPressureStatus: getNodeConditionByType(clusterNode.Status.NodeStatus.Conditions, v1.NodeMemoryPressure).Status,
-	}
-	stats[clusterName][clusterNodeName] = newData
-	nodeNameToClusterName[clusterNodeName] = clusterName
-	s.aggregate(cluster, clusterName)
-	err = s.update(cluster)
-	if err != nil {
-		stats[clusterName][clusterNodeName] = oldData
-		return err
-	}
-	logrus.Debugf("Successfully updated cluster [%s] stats", clusterName)
-	return nil
-}
-
-func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) {
 	// capacity keys
 	pods, mem, cpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
 	// allocatable keys
@@ -112,40 +77,40 @@ func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) {
 	condDisk := v1.ConditionTrue
 	condMem := v1.ConditionTrue
 
-	for _, v := range stats[clusterName] {
-		if v == nil {
+	for _, machine := range machines {
+		if clusterName != machine.Status.ClusterName {
 			continue
 		}
 
-		if v.Capacity != nil {
-			pods.Add(*v.Capacity.Pods())
-			mem.Add(*v.Capacity.Memory())
-			cpu.Add(*v.Capacity.Cpu())
+		capacity := machine.Status.NodeStatus.Capacity
+		if capacity != nil {
+			pods.Add(*capacity.Pods())
+			mem.Add(*capacity.Memory())
+			cpu.Add(*capacity.Cpu())
+		}
+		allocatable := machine.Status.NodeStatus.Allocatable
+		if allocatable != nil {
+			apods.Add(*allocatable.Pods())
+			amem.Add(*allocatable.Memory())
+			acpu.Add(*allocatable.Cpu())
+		}
+		requested := machine.Status.Requested
+		if requested != nil {
+			rpods.Add(*requested.Pods())
+			rmem.Add(*requested.Memory())
+			rcpu.Add(*requested.Cpu())
+		}
+		limits := machine.Status.Limits
+		if limits != nil {
+			lpods.Add(*limits.Pods())
+			lmem.Add(*limits.Memory())
+			lcpu.Add(*limits.Cpu())
 		}
 
-		if v.Allocatable != nil {
-			apods.Add(*v.Allocatable.Pods())
-			amem.Add(*v.Allocatable.Memory())
-			acpu.Add(*v.Allocatable.Cpu())
-		}
-
-		if v.Requested != nil {
-			rpods.Add(*v.Requested.Pods())
-			rmem.Add(*v.Requested.Memory())
-			rcpu.Add(*v.Requested.Cpu())
-		}
-
-		if v.Limits != nil {
-			lpods.Add(*v.Limits.Pods())
-			lmem.Add(*v.Limits.Memory())
-			lcpu.Add(*v.Limits.Cpu())
-		}
-
-		if condDisk == v1.ConditionTrue && v.ConditionNoDiskPressureStatus == v1.ConditionTrue {
+		if condDisk == v1.ConditionTrue && v3.ClusterConditionNoDiskPressure.IsTrue(machine) {
 			condDisk = v1.ConditionFalse
 		}
-
-		if condMem == v1.ConditionTrue && v.ConditionNoMemoryPressureStatus == v1.ConditionTrue {
+		if condMem == v1.ConditionTrue && v3.ClusterConditionNoMemoryPressure.IsTrue(machine) {
 			condMem = v1.ConditionFalse
 		}
 	}
@@ -164,22 +129,31 @@ func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) {
 	} else {
 		v3.ClusterConditionNoMemoryPressure.False(cluster)
 	}
+
+	return nil
 }
 
-func (s *StatsAggregator) update(cluster *v3.Cluster) error {
-	_, err := s.Clusters.Update(cluster)
-	return err
+func (s *StatsAggregator) GetName() string {
+	return "cluster-stats-controller"
 }
 
-func (s *StatsAggregator) getCluster(clusterName string) (*v3.Cluster, error) {
-	return s.Clusters.Get(clusterName, metav1.GetOptions{})
+func (m *MachineSyncer) Create(machine *v3.Machine) (*v3.Machine, error) {
+	return m.sync(machine)
 }
 
-func getNodeConditionByType(conditions []v1.NodeCondition, conditionType v1.NodeConditionType) *v1.NodeCondition {
-	for _, condition := range conditions {
-		if condition.Type == conditionType {
-			return &condition
-		}
-	}
-	return &v1.NodeCondition{}
+func (m *MachineSyncer) Updated(machine *v3.Machine) (*v3.Machine, error) {
+	return m.sync(machine)
+}
+
+func (m *MachineSyncer) Remove(machine *v3.Machine) (*v3.Machine, error) {
+	return m.sync(machine)
+}
+
+func (m *MachineSyncer) sync(machine *v3.Machine) (*v3.Machine, error) {
+	m.Clusters.Controller().Enqueue("", machine.ClusterName)
+	return nil, nil
+}
+
+func (m *MachineSyncer) GetName() string {
+	return "cluster-node-controller"
 }

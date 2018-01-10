@@ -20,7 +20,7 @@ import (
 func Register(ctx context.Context, management *config.ManagementContext) {
 	machineController.Register(management)
 	catalogController.Register(ctx, management)
-	clusterheartbeat.Register(management)
+	clusterheartbeat.Register(ctx, management)
 	clusterprovisioner.Register(management)
 	clusterstats.Register(management)
 	agent.Register(ctx, management)
