@@ -11,8 +11,6 @@ import (
 	"github.com/rancher/cluster-controller/controller/clusterprovisioner"
 	"github.com/rancher/cluster-controller/controller/clusterstats"
 	"github.com/rancher/cluster-controller/controller/machinessyncer"
-	"github.com/rancher/cluster-controller/controller/namespace"
-	"github.com/rancher/cluster-controller/controller/secrets"
 	machineController "github.com/rancher/machine-controller/controller"
 	"github.com/rancher/types/config"
 )
@@ -27,6 +25,4 @@ func Register(ctx context.Context, management *config.ManagementContext) {
 	clusterevents.Register(ctx, management)
 	auth.Register(ctx, management)
 	machinessyncer.Register(management)
-	secrets.Register(management)
-	namespace.Register(management)
 }
