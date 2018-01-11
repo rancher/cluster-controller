@@ -11,30 +11,19 @@ import (
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-const (
-	RemoveAction = "Remove"
-	UpdateAction = "Update"
-	CreateAction = "Create"
-	NoopAction   = "Noop"
-)
-
 type Provisioner struct {
-	Clusters v3.ClusterInterface
-	Machines v3.MachineInterface
+	machines v3.MachineLister
 }
 
 func Register(management *config.ManagementContext) {
-	clustersClient := management.Management.Clusters("")
-	machineClient := management.Management.Machines("")
 	p := &Provisioner{
-		Clusters: clustersClient,
-		Machines: machineClient,
+		machines: management.Management.Machines("").Controller().Lister(),
 	}
-	clustersClient.AddLifecycle(p.GetName(), p)
+	management.Management.Clusters("").AddLifecycle(p.GetName(), p)
 }
 
 func configChanged(cluster *v3.Cluster) bool {
@@ -167,13 +156,13 @@ func (p *Provisioner) getConfigNodes(config v3.RancherKubernetesEngineConfig, cl
 
 func (p *Provisioner) populateClusterNodes(config v3.RancherKubernetesEngineConfig, clusterName string) ([]v3.RKEConfigNode, error) {
 	populatedNodes := []v3.RKEConfigNode{}
-	allMachines, err := p.Machines.List(metav1.ListOptions{})
+	allMachines, err := p.machines.List("", labels.NewSelector())
 	if err != nil {
 		return populatedNodes, err
 	}
 	machineMap := make(map[string]v3.Machine)
-	for _, machine := range allMachines.Items {
-		machineMap[machine.Name] = machine
+	for _, machine := range allMachines {
+		machineMap[machine.Name] = *machine
 	}
 	for _, node := range config.Nodes {
 		if len(node.MachineName) != 0 {
@@ -183,7 +172,7 @@ func (p *Provisioner) populateClusterNodes(config v3.RancherKubernetesEngineConf
 			machine := machineMap[node.MachineName]
 			if len(node.User) == 0 {
 				// Check if machine is ready
-				readyMachine, err := p.waitForMachineToBeProvisioned(machine)
+				readyMachine, err := p.waitForMachineToBeProvisioned(&machine)
 				if err != nil {
 					return populatedNodes, err
 				}
@@ -201,13 +190,13 @@ func (p *Provisioner) populateClusterNodes(config v3.RancherKubernetesEngineConf
 	return populatedNodes, nil
 }
 
-func (p *Provisioner) waitForMachineToBeProvisioned(machine v3.Machine) (v3.Machine, error) {
+func (p *Provisioner) waitForMachineToBeProvisioned(machine *v3.Machine) (*v3.Machine, error) {
 	for retryCount := 0; retryCount < 5; retryCount++ {
-		allMachines, err := p.Machines.List(metav1.ListOptions{})
+		allMachines, err := p.machines.List("", labels.NewSelector())
 		if err != nil {
 			return machine, err
 		}
-		for _, m := range allMachines.Items {
+		for _, m := range allMachines {
 			if machine.Name == m.Name {
 				if checkMachineConditionProvisioned(m.Name, m.Status.Conditions) {
 					return m, nil
