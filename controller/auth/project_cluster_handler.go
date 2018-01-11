@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 	v12 "k8s.io/api/core/v1"
 	v13 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,7 +57,8 @@ func (l *projectLifecycle) Updated(obj *v3.Project) (*v3.Project, error) {
 }
 
 func (l *projectLifecycle) Remove(obj *v3.Project) (*v3.Project, error) {
-	return obj, nil
+	err := l.mgr.deleteNamespace(obj)
+	return obj, err
 }
 
 type clusterLifecycle struct {
@@ -89,7 +91,8 @@ func (l *clusterLifecycle) Updated(obj *v3.Cluster) (*v3.Cluster, error) {
 }
 
 func (l *clusterLifecycle) Remove(obj *v3.Cluster) (*v3.Cluster, error) {
-	return obj, nil
+	err := l.mgr.deleteNamespace(obj)
+	return obj, err
 }
 
 type mgr struct {
@@ -196,6 +199,20 @@ func (m *mgr) reconcileCreatorRTB(obj runtime.Object) (runtime.Object, error) {
 	})
 }
 
+func (m *mgr) deleteNamespace(obj runtime.Object) error {
+	o, err := meta.Accessor(obj)
+	if err != nil {
+		return condition.Error("MissingMetadata", err)
+	}
+
+	nsClient := m.mgmt.K8sClient.CoreV1().Namespaces()
+	err = nsClient.Delete(o.GetName(), &v1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func (m *mgr) reconcileResourceToNamespace(obj runtime.Object) (runtime.Object, error) {
 	return v3.NamespaceBackedResource.Do(obj, func() (runtime.Object, error) {
 		o, err := meta.Accessor(obj)
@@ -215,14 +232,6 @@ func (m *mgr) reconcileResourceToNamespace(obj runtime.Object) (runtime.Object, 
 					Name: o.GetName(),
 					Annotations: map[string]string{
 						"management.cattle.io/system-namespace": "true",
-					},
-					OwnerReferences: []v1.OwnerReference{
-						{
-							APIVersion: t.GetAPIVersion(),
-							Kind:       t.GetKind(),
-							Name:       o.GetName(),
-							UID:        o.GetUID(),
-						},
 					},
 				},
 			})
