@@ -1,6 +1,8 @@
 package clusterstats
 
 import (
+	"reflect"
+
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"k8s.io/api/core/v1"
@@ -9,11 +11,9 @@ import (
 )
 
 type StatsAggregator struct {
-	Machines v3.MachineLister
-}
-
-type MachineSyncer struct {
-	Clusters v3.ClusterInterface
+	Machines          v3.MachineLister
+	ClusterController v3.ClusterController
+	Clusters          v3.ClusterInterface
 }
 
 type ClusterNodeData struct {
@@ -28,42 +28,32 @@ type ClusterNodeData struct {
 func Register(management *config.ManagementContext) {
 	clustersClient := management.Management.Clusters("")
 	machinesClient := management.Management.Machines("")
-	m := &MachineSyncer{
-		Clusters: clustersClient,
-	}
-	machinesClient.AddLifecycle(m.GetName(), m)
 
 	s := &StatsAggregator{
-		Machines: management.Management.Machines("").Controller().Lister(),
+		Machines:          machinesClient.Controller().Lister(),
+		ClusterController: clustersClient.Controller(),
+		Clusters:          clustersClient,
 	}
-	clustersClient.AddLifecycle(s.GetName(), s)
+
+	clustersClient.AddSyncHandler(s.sync)
+	machinesClient.AddSyncHandler(s.machineChanged)
 }
 
-func (s *StatsAggregator) Create(cluster *v3.Cluster) (*v3.Cluster, error) {
-	return s.update(cluster)
-}
-
-func (s *StatsAggregator) Updated(cluster *v3.Cluster) (*v3.Cluster, error) {
-	return s.update(cluster)
-}
-
-func (s *StatsAggregator) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
-	return s.update(cluster)
-}
-
-func (s *StatsAggregator) update(cluster *v3.Cluster) (*v3.Cluster, error) {
-	err := s.aggregate(cluster, cluster.Name)
-	if err != nil {
-		return nil, err
+func (s *StatsAggregator) sync(key string, cluster *v3.Cluster) error {
+	if cluster == nil {
+		return nil
 	}
-	return cluster, nil
+
+	return s.aggregate(cluster, cluster.Name)
 }
 
 func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) error {
-	machines, err := s.Machines.List("", labels.Everything())
+	machines, err := s.Machines.List(cluster.Name, labels.Everything())
 	if err != nil {
 		return err
 	}
+
+	origStatus := cluster.Status.DeepCopy()
 
 	// capacity keys
 	pods, mem, cpu := resource.Quantity{}, resource.Quantity{}, resource.Quantity{}
@@ -78,10 +68,6 @@ func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) err
 	condMem := v1.ConditionTrue
 
 	for _, machine := range machines {
-		if clusterName != machine.Status.ClusterName {
-			continue
-		}
-
 		capacity := machine.Status.NodeStatus.Capacity
 		if capacity != nil {
 			pods.Add(*capacity.Pods())
@@ -130,30 +116,17 @@ func (s *StatsAggregator) aggregate(cluster *v3.Cluster, clusterName string) err
 		v3.ClusterConditionNoMemoryPressure.False(cluster)
 	}
 
+	if !reflect.DeepEqual(origStatus, cluster.Status) {
+		_, err := s.Clusters.Update(cluster)
+		return err
+	}
+
 	return nil
 }
 
-func (s *StatsAggregator) GetName() string {
-	return "cluster-stats-controller"
-}
-
-func (m *MachineSyncer) Create(machine *v3.Machine) (*v3.Machine, error) {
-	return m.sync(machine)
-}
-
-func (m *MachineSyncer) Updated(machine *v3.Machine) (*v3.Machine, error) {
-	return m.sync(machine)
-}
-
-func (m *MachineSyncer) Remove(machine *v3.Machine) (*v3.Machine, error) {
-	return m.sync(machine)
-}
-
-func (m *MachineSyncer) sync(machine *v3.Machine) (*v3.Machine, error) {
-	m.Clusters.Controller().Enqueue("", machine.ClusterName)
-	return nil, nil
-}
-
-func (m *MachineSyncer) GetName() string {
-	return "cluster-node-controller"
+func (s *StatsAggregator) machineChanged(key string, machine *v3.Machine) error {
+	if machine != nil {
+		s.ClusterController.Enqueue("", machine.Namespace)
+	}
+	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rancher/cluster-agent/utils"
-	"github.com/rancher/norman/condition"
 	"github.com/rancher/types/apis/management.cattle.io/v3"
 	"github.com/rancher/types/config"
 	"github.com/sirupsen/logrus"
@@ -55,10 +54,11 @@ func (h *HeartBeatSyncer) Updated(cluster *v3.Cluster) (*v3.Cluster, error) {
 }
 
 func (h *HeartBeatSyncer) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
+	mapLock.Lock()
+	defer mapLock.Unlock()
+
 	key := cluster.Name
 	if _, exists := clusterToLastUpdated[key]; exists {
-		mapLock.Lock()
-		defer mapLock.Unlock()
 		delete(clusterToLastUpdated, key)
 		logrus.Debugf("Cluster [%s] deleted", key)
 	}
@@ -77,10 +77,10 @@ func isChanged(cluster *v3.Cluster) (bool, time.Time) {
 }
 
 func (h *HeartBeatSyncer) storeLastUpdateTime(cluster *v3.Cluster) {
-	key := cluster.Name
 	mapLock.Lock()
 	defer mapLock.Unlock()
 
+	key := cluster.Name
 	if _, exists := clusterToLastUpdated[key]; !exists {
 		clusterToLastUpdated[key] = &updateData{}
 	}
@@ -121,15 +121,6 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 			clusterToLastUpdated[clusterName].updated = false
 		}
 	}
-}
-
-func getConditionByType(cluster *v3.Cluster, conditionType condition.Cond) (int, *v3.ClusterCondition) {
-	for index, condition := range cluster.Status.Conditions {
-		if string(condition.Type) == string(conditionType) {
-			return index, &condition
-		}
-	}
-	return -1, nil
 }
 
 // Condition is Ready if conditionType is Ready and conditionStatus is True/False but not unknown.
