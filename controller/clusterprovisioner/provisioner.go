@@ -10,9 +10,12 @@ import (
 	"sort"
 
 	"github.com/pkg/errors"
+	"github.com/rancher/cluster-controller/dialer"
+	"github.com/rancher/kontainer-engine/drivers/rke"
 	"github.com/rancher/kontainer-engine/logstream"
 	"github.com/rancher/kontainer-engine/service"
-	store2 "github.com/rancher/machine-controller/store"
+	"github.com/rancher/machine-controller/store"
+	machineconfig "github.com/rancher/machine-controller/store/config"
 	"github.com/rancher/norman/condition"
 	"github.com/rancher/norman/controller"
 	"github.com/rancher/norman/event"
@@ -42,7 +45,7 @@ type Provisioner struct {
 }
 
 func Register(management *config.ManagementContext) {
-	store, err := store2.NewGenericEncrypedStore("c-", "", management.Core.Namespaces(""),
+	store, err := store.NewGenericEncrypedStore("c-", "", management.Core.Namespaces(""),
 		management.K8sClient.CoreV1())
 	if err != nil {
 		logrus.Fatal(err)
@@ -62,6 +65,22 @@ func Register(management *config.ManagementContext) {
 	// Add handlers
 	p.Clusters.AddLifecycle("cluster-provisioner-controller", p)
 	management.Management.Machines("").AddSyncHandler(p.machineChanged)
+
+	// Setup custom dialer to RKE
+	secretStore, err := machineconfig.NewStore(management)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+
+	d := &dialer.TLSDialerFactory{
+		Store:           secretStore,
+		MachineClient:   management.Management.Machines(""),
+		ConfigMapGetter: management.K8sClient.CoreV1(),
+	}
+
+	driver := service.Drivers["rke"]
+	rkeDriver := driver.(*rke.Driver)
+	rkeDriver.DockerDialer = d.Build
 }
 
 func (p *Provisioner) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
