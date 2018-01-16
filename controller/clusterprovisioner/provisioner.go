@@ -439,7 +439,7 @@ func (p *Provisioner) getCtx(cluster *v3.Cluster, cond condition.Cond) (context.
 					cluster = newCluster
 				} else {
 					newCluster, err = p.Clusters.Get(cluster.Name, metav1.GetOptions{})
-					if err != nil {
+					if err == nil {
 						cluster = newCluster
 					}
 				}
