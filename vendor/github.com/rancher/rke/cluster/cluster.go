@@ -52,6 +52,9 @@ const (
 	KubeDNSAutoScalerImage     = "kubedns_autoscaler_image"
 	ServiceSidekickImage       = "service_sidekick_image"
 	NoneAuthorizationMode      = "none"
+	LocalNodeAddress           = "127.0.0.1"
+	LocalNodeHostname          = "localhost"
+	LocalNodeUser              = "root"
 )
 
 func (c *Cluster) DeployControlPlane(ctx context.Context) error {
@@ -97,7 +100,12 @@ func ParseConfig(clusterFile string) (*v3.RancherKubernetesEngineConfig, error) 
 	return &rkeConfig, nil
 }
 
-func ParseCluster(ctx context.Context, rkeConfig *v3.RancherKubernetesEngineConfig, clusterFilePath string, dockerDialerFactory, localConnDialerFactory hosts.DialerFactory) (*Cluster, error) {
+func ParseCluster(
+	ctx context.Context,
+	rkeConfig *v3.RancherKubernetesEngineConfig,
+	clusterFilePath, configDir string,
+	dockerDialerFactory,
+	localConnDialerFactory hosts.DialerFactory) (*Cluster, error) {
 	var err error
 	c := &Cluster{
 		RancherKubernetesEngineConfig: *rkeConfig,
@@ -126,7 +134,7 @@ func ParseCluster(ctx context.Context, rkeConfig *v3.RancherKubernetesEngineConf
 	if len(c.ConfigPath) == 0 {
 		c.ConfigPath = DefaultClusterConfig
 	}
-	c.LocalKubeConfigPath = GetLocalKubeConfig(c.ConfigPath)
+	c.LocalKubeConfigPath = GetLocalKubeConfig(c.ConfigPath, configDir)
 	return c, nil
 }
 
@@ -199,8 +207,11 @@ func (c *Cluster) setClusterImageDefaults() {
 	}
 }
 
-func GetLocalKubeConfig(configPath string) string {
+func GetLocalKubeConfig(configPath, configDir string) string {
 	baseDir := filepath.Dir(configPath)
+	if len(configDir) > 0 {
+		baseDir = filepath.Dir(configDir)
+	}
 	fileName := filepath.Base(configPath)
 	baseDir += "/"
 	return fmt.Sprintf("%s%s%s", baseDir, pki.KubeAdminConfigPrefix, fileName)

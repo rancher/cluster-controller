@@ -24,6 +24,7 @@ type Host struct {
 	EnforceDockerVersion bool
 	ToAddEtcdMember      bool
 	ExistingEtcdCluster  bool
+	SavedKeyPhrase       string
 }
 
 const (
@@ -32,6 +33,7 @@ const (
 	ToCleanCNIConf       = "/etc/cni"
 	ToCleanCNIBin        = "/opt/cni"
 	ToCleanCalicoRun     = "/var/run/calico"
+	ToCleanTempCertPath  = "/etc/kubernetes/.tmp/"
 	CleanerContainerName = "kube-cleaner"
 )
 
@@ -43,6 +45,7 @@ func (h *Host) CleanUpAll(ctx context.Context, cleanerImage string) error {
 		ToCleanCNIConf,
 		ToCleanCNIBin,
 		ToCleanCalicoRun,
+		ToCleanTempCertPath,
 	}
 	return h.CleanUp(ctx, toCleanPaths, cleanerImage)
 }
