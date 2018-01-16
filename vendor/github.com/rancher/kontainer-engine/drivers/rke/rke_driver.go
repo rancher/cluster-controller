@@ -5,14 +5,22 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/rancher/kontainer-engine/drivers"
 	"github.com/rancher/kontainer-engine/types"
+	"github.com/rancher/norman/types/slice"
 	"github.com/rancher/rke/cmd"
 	"github.com/rancher/rke/hosts"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+)
+
+const (
+	kubeConfigFile = ".kube_config_cluster.yml"
+	rancherPath    = "/var/lib/rancher/rke/"
 )
 
 // Driver is the struct of rke driver
@@ -74,20 +82,28 @@ func (d *Driver) Create(ctx context.Context, opts *types.DriverOptions) (*types.
 		return nil, err
 	}
 
-	APIURL, caCrt, clientCert, clientKey, err := cmd.ClusterUp(ctx, &rkeConfig, d.DockerDialer, nil)
+	stateDir, err := d.restore(nil)
 	if err != nil {
 		return nil, err
 	}
+	APIURL, caCrt, clientCert, clientKey, err := cmd.ClusterUp(ctx, &rkeConfig, d.DockerDialer, nil, false, stateDir)
+	if err != nil {
+		return d.save(&types.ClusterInfo{
+			Metadata: map[string]string{
+				"Config": yaml,
+			},
+		}, stateDir), err
+	}
 
-	return &types.ClusterInfo{
+	return d.save(&types.ClusterInfo{
 		Metadata: map[string]string{
 			"Endpoint":   APIURL,
-			"RootCA":     caCrt,
-			"ClientCert": clientCert,
-			"ClientKey":  clientKey,
+			"RootCA":     base64.StdEncoding.EncodeToString([]byte(caCrt)),
+			"ClientCert": base64.StdEncoding.EncodeToString([]byte(clientCert)),
+			"ClientKey":  base64.StdEncoding.EncodeToString([]byte(clientKey)),
 			"Config":     yaml,
 		},
-	}, nil
+	}, stateDir), nil
 }
 
 // Update updates the rke cluster
@@ -102,7 +118,12 @@ func (d *Driver) Update(ctx context.Context, clusterInfo *types.ClusterInfo, opt
 		return nil, err
 	}
 
-	APIURL, caCrt, clientCert, clientKey, err := cmd.ClusterUp(ctx, &rkeConfig, d.DockerDialer, nil)
+	stateDir, err := d.restore(clusterInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	APIURL, caCrt, clientCert, clientKey, err := cmd.ClusterUp(ctx, &rkeConfig, d.DockerDialer, nil, false, stateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -112,20 +133,33 @@ func (d *Driver) Update(ctx context.Context, clusterInfo *types.ClusterInfo, opt
 	}
 
 	clusterInfo.Metadata["Endpoint"] = APIURL
-	clusterInfo.Metadata["RootCA"] = caCrt
-	clusterInfo.Metadata["ClientCert"] = clientCert
-	clusterInfo.Metadata["ClientKey"] = clientKey
+	clusterInfo.Metadata["RootCA"] = base64.StdEncoding.EncodeToString([]byte(caCrt))
+	clusterInfo.Metadata["ClientCert"] = base64.StdEncoding.EncodeToString([]byte(clientCert))
+	clusterInfo.Metadata["ClientKey"] = base64.StdEncoding.EncodeToString([]byte(clientKey))
 	clusterInfo.Metadata["Config"] = yaml
 
-	return clusterInfo, nil
+	return d.save(clusterInfo, stateDir), nil
 }
 
 // PostCheck does post action
 func (d *Driver) PostCheck(ctx context.Context, info *types.ClusterInfo) (*types.ClusterInfo, error) {
 	info.Endpoint = info.Metadata["Endpoint"]
-	info.ClientCertificate = base64.StdEncoding.EncodeToString([]byte(info.Metadata["ClientCert"]))
-	info.ClientKey = base64.StdEncoding.EncodeToString([]byte(info.Metadata["ClientKey"]))
-	info.RootCaCertificate = base64.StdEncoding.EncodeToString([]byte(info.Metadata["RootCA"]))
+	info.ClientCertificate = info.Metadata["ClientCert"]
+	info.ClientKey = info.Metadata["ClientKey"]
+	info.RootCaCertificate = info.Metadata["RootCA"]
+
+	certBytes, err := base64.StdEncoding.DecodeString(info.ClientCertificate)
+	if err != nil {
+		return nil, err
+	}
+	keyBytes, err := base64.StdEncoding.DecodeString(info.ClientKey)
+	if err != nil {
+		return nil, err
+	}
+	rootBytes, err := base64.StdEncoding.DecodeString(info.RootCaCertificate)
+	if err != nil {
+		return nil, err
+	}
 
 	host := info.Endpoint
 	if !strings.HasPrefix(host, "https://") {
@@ -134,9 +168,9 @@ func (d *Driver) PostCheck(ctx context.Context, info *types.ClusterInfo) (*types
 	config := &rest.Config{
 		Host: host,
 		TLSClientConfig: rest.TLSClientConfig{
-			CAData:   []byte(info.RootCaCertificate),
-			CertData: []byte(info.ClientCertificate),
-			KeyData:  []byte(info.ClientKey),
+			CAData:   rootBytes,
+			CertData: certBytes,
+			KeyData:  keyBytes,
 		},
 	}
 
@@ -157,7 +191,30 @@ func (d *Driver) PostCheck(ctx context.Context, info *types.ClusterInfo) (*types
 
 	info.Version = serverVersion.GitVersion
 	info.ServiceAccountToken = token
-	return info, nil
+
+	info.NodeCount, err = nodeCount(info)
+	return info, err
+}
+
+func nodeCount(info *types.ClusterInfo) (int64, error) {
+	yaml, ok := info.Metadata["Config"]
+	if !ok {
+		return 0, nil
+	}
+
+	rkeConfig, err := drivers.ConvertToRkeConfig(yaml)
+	if err != nil {
+		return 0, err
+	}
+
+	count := int64(0)
+	for _, node := range rkeConfig.Nodes {
+		if slice.ContainsString(node.Role, "worker") {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 // Remove removes the cluster
@@ -166,5 +223,48 @@ func (d *Driver) Remove(ctx context.Context, clusterInfo *types.ClusterInfo) err
 	if err != nil {
 		return err
 	}
-	return cmd.ClusterRemove(ctx, &rkeConfig, d.DockerDialer)
+	stateDir, _ := d.restore(clusterInfo)
+	defer d.save(nil, stateDir)
+	return cmd.ClusterRemove(ctx, &rkeConfig, d.DockerDialer, false, stateDir)
+}
+
+func (d *Driver) restore(info *types.ClusterInfo) (string, error) {
+	os.MkdirAll(rancherPath, 0700)
+	dir, err := ioutil.TempDir(rancherPath, "rke-")
+	if err != nil {
+		return "", err
+	}
+
+	if info != nil {
+		state := info.Metadata["state"]
+		if state != "" {
+			ioutil.WriteFile(filepath.Join(dir, kubeConfigFile), []byte(state), 0600)
+		}
+	}
+
+	return filepath.Join(dir, "cluster.yml"), nil
+}
+
+func (d *Driver) save(info *types.ClusterInfo, stateDir string) *types.ClusterInfo {
+	if info != nil {
+		b, err := ioutil.ReadFile(kubeConfig(stateDir))
+		if err == nil {
+			if info.Metadata == nil {
+				info.Metadata = map[string]string{}
+			}
+			info.Metadata["state"] = string(b)
+		}
+	}
+
+	if strings.HasPrefix(stateDir, rancherPath) && strings.HasSuffix(stateDir, "/cluster.yml") && !strings.Contains(stateDir, "..") {
+		os.Remove(stateDir)
+		os.Remove(kubeConfig(stateDir))
+		os.Remove(filepath.Dir(stateDir))
+	}
+
+	return info
+}
+
+func kubeConfig(stateDir string) string {
+	return filepath.Join(filepath.Dir(stateDir), kubeConfigFile)
 }

@@ -27,6 +27,10 @@ func RemoveCommand() cli.Command {
 			Name:  "force",
 			Usage: "Force removal of the cluster",
 		},
+		cli.BoolFlag{
+			Name:  "local",
+			Usage: "Deploy Kubernetes cluster locally",
+		},
 	}
 	return cli.Command{
 		Name:   "remove",
@@ -36,14 +40,19 @@ func RemoveCommand() cli.Command {
 	}
 }
 
-func ClusterRemove(ctx context.Context, rkeConfig *v3.RancherKubernetesEngineConfig, dialerFactory hosts.DialerFactory) error {
-	log.Infof(ctx, "Tearing down Kubernetes cluster")
-	kubeCluster, err := cluster.ParseCluster(ctx, rkeConfig, clusterFilePath, dialerFactory, nil)
+func ClusterRemove(
+	ctx context.Context,
+	rkeConfig *v3.RancherKubernetesEngineConfig,
+	dialerFactory hosts.DialerFactory,
+	local bool, configDir string) error {
+
+	logrus.Infof("Tearing down Kubernetes cluster")
+	kubeCluster, err := cluster.ParseCluster(ctx, rkeConfig, clusterFilePath, configDir, dialerFactory, nil)
 	if err != nil {
 		return err
 	}
 
-	err = kubeCluster.TunnelHosts(ctx)
+	err = kubeCluster.TunnelHosts(ctx, local)
 	if err != nil {
 		return err
 	}
@@ -72,15 +81,23 @@ func clusterRemoveFromCli(ctx *cli.Context) error {
 			return nil
 		}
 	}
+	if ctx.Bool("local") {
+		return clusterRemoveLocal(ctx)
+	}
 	clusterFile, filePath, err := resolveClusterFile(ctx)
 	if err != nil {
 		return fmt.Errorf("Failed to resolve cluster file: %v", err)
 	}
 	clusterFilePath = filePath
-
 	rkeConfig, err := cluster.ParseConfig(clusterFile)
 	if err != nil {
 		return fmt.Errorf("Failed to parse cluster file: %v", err)
 	}
-	return ClusterRemove(context.Background(), rkeConfig, nil)
+	return ClusterRemove(context.Background(), rkeConfig, nil, false, "")
+}
+
+func clusterRemoveLocal(ctx *cli.Context) error {
+	var rkeConfig *v3.RancherKubernetesEngineConfig
+	rkeConfig = cluster.GetLocalRKEConfig()
+	return ClusterRemove(context.Background(), rkeConfig, nil, true, "")
 }
