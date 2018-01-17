@@ -118,7 +118,7 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 			v3.ClusterConditionReady.Message(cluster, msgBehindOnPing)
 			v3.ClusterConditionReady.Reason(cluster, reasonBehindOnPing)
 
-			logrus.Infof("Cluster [%s] condition status unknown", clusterName)
+			logrus.Debugf("Cluster [%s] condition status unknown", clusterName)
 		} else {
 			clusterToLastUpdated[clusterName].updated = false
 		}
