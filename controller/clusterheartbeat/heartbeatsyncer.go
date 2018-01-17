@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	syncInterval = 20 * time.Second
-	msgUnknown   = "Not received heartbeat from cluster-agent"
+	syncInterval       = 20 * time.Second
+	msgBehindOnPing    = "Not received heartbeat from cluster-agent"
+	reasonBehindOnPing = "BehindOnPing"
 )
 
 type updateData struct {
@@ -114,7 +115,8 @@ func (h *HeartBeatSyncer) checkHeartBeat() {
 			}
 
 			v3.ClusterConditionReady.False(cluster)
-			v3.ClusterConditionReady.Reason(cluster, msgUnknown)
+			v3.ClusterConditionReady.Message(cluster, msgBehindOnPing)
+			v3.ClusterConditionReady.Reason(cluster, reasonBehindOnPing)
 
 			logrus.Infof("Cluster [%s] condition status unknown", clusterName)
 		} else {
