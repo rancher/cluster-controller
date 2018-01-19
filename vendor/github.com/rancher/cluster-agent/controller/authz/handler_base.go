@@ -2,6 +2,7 @@ package authz
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -81,14 +82,15 @@ type manager struct {
 func (m *manager) ensureRoles(rts map[string]*v3.RoleTemplate) error {
 	roleCli := m.workload.K8sClient.RbacV1().ClusterRoles()
 	for _, rt := range rts {
-		if rt.Builtin {
-			// TODO assert the role exists and log an error if it doesnt.
+		if rt.External {
 			continue
 		}
 
 		if role, err := m.crLister.Get("", rt.Name); err == nil && role != nil {
+			if reflect.DeepEqual(role.Rules, rt.Rules) {
+				continue
+			}
 			role = role.DeepCopy()
-			// TODO potentially check a version so that we don't do unnecessary updates
 			role.Rules = rt.Rules
 			_, err := roleCli.Update(role)
 			if err != nil {
@@ -142,7 +144,7 @@ func (m *manager) ensureBinding(ns, roleName string, binding *v3.ProjectRoleTemp
 }
 
 func bindingParts(roleName, parentUID string, subject rbacv1.Subject) (string, metav1.ObjectMeta, []rbacv1.Subject, rbacv1.RoleRef) {
-	bindingName := strings.ToLower(fmt.Sprintf("%v-%v-%v", roleName, subject.Name, parentUID))
+	bindingName := strings.ToLower(fmt.Sprintf("%v-%v", roleName, subject.Name))
 	return bindingName,
 		metav1.ObjectMeta{
 			Name:   bindingName,
