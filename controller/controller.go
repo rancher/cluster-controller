@@ -15,6 +15,7 @@ import (
 )
 
 func Register(ctx context.Context, management *config.ManagementContext) {
+	// auth registered first so that backing namespaces can be quickly created
 	auth.Register(ctx, management)
 	agent.Register(ctx, management)
 	machineController.Register(management)
