@@ -14,10 +14,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const creatorIDAnn = "field.cattle.io/creatorId"
+
+var defaultProjectLabels = labels.Set(map[string]string{"authz.management.cattle.io/default-project": "true"})
 
 func newPandCLifecycles(management *config.ManagementContext) (*projectLifecycle, *clusterLifecycle) {
 	m := &mgr{
@@ -140,9 +143,11 @@ func (m *mgr) createDefaultProject(obj runtime.Object) (runtime.Object, error) {
 			return obj, err
 		}
 
-		projectName := "rancher-default"
-		p, _ := m.projectLister.Get(metaAccessor.GetName(), projectName)
-		if p != nil {
+		projects, err := m.projectLister.List(metaAccessor.GetName(), defaultProjectLabels.AsSelector())
+		if err != nil {
+			return obj, err
+		}
+		if len(projects) > 0 {
 			return obj, nil
 		}
 
@@ -158,6 +163,7 @@ func (m *mgr) createDefaultProject(obj runtime.Object) (runtime.Object, error) {
 				Annotations: map[string]string{
 					creatorIDAnn: creatorID,
 				},
+				Labels: defaultProjectLabels,
 			},
 			Spec: v3.ProjectSpec{
 				DisplayName: "Default",
