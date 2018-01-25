@@ -88,19 +88,32 @@ func Register(management *config.ManagementContext) {
 
 func (p *Provisioner) Remove(cluster *v3.Cluster) (*v3.Cluster, error) {
 	logrus.Infof("Deleting cluster [%s]", cluster.Name)
+	var err error
+	var removed bool
+	errChan := make(chan error, 1)
 	if !needToProvision(cluster) {
 		return nil, nil
 	}
-
 	for i := 0; i < 4; i++ {
-		err := p.driverRemove(cluster)
-		if err == nil {
+		go func() {
+			errChan <- p.driverRemove(cluster)
+		}()
+		select {
+		case err = <-errChan:
+			if err == nil {
+				removed = true
+				break
+			}
+			time.Sleep(1 * time.Second)
+		case <-time.After(time.Second * 120):
+			err = fmt.Errorf("timeout waiting to remove the cluster [%s]: %v", cluster.Name, err)
 			break
 		}
-		if i == 3 {
+		if removed {
+			break
+		} else if i == 3 {
 			return cluster, fmt.Errorf("failed to remove the cluster [%s]: %v", cluster.Name, err)
 		}
-		time.Sleep(1 * time.Second)
 	}
 	logrus.Infof("Deleted cluster [%s]", cluster.Name)
 
